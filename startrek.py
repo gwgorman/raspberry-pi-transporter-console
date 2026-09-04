@@ -404,6 +404,11 @@ def draw_console(surface, now):
         txt(surface, label, h * .016, MUTED, (r["right"].x + 20, y), bold=True)
         bar(surface, pygame.Rect(r["right"].x + 20, y + 24, r["right"].w - 40, 16), value + math.sin(now + y) * .025, color, 14)
         y += int(h * .075)
+    if countdown_value is None and not self_destruct_active:
+        maker_plate = pygame.Rect(r["right"].x + 62, r["right"].bottom - 31, r["right"].w - 124, 18)
+        pygame.draw.rect(surface, (72, 77, 73), maker_plate, border_radius=2)
+        pygame.draw.rect(surface, (18, 21, 20), maker_plate.inflate(-4, -4), border_radius=1)
+        txt(surface, "GREG // MAX  •  TRANSPORTER LAB  •  2026", h * .0095, CREAM, maker_plate.center, "center", True)
     if countdown_value is not None:
         txt(surface, countdown_value, h * .16, RED, (r["right"].centerx, r["right"].bottom - 58), "center", True)
     elif self_destruct_active:

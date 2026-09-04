@@ -2,6 +2,8 @@
 
 A full-screen, touch-first sci-fi transporter console built for a Halloween party. It turns a Raspberry Pi, a 1080p touchscreen, and a speaker into an interactive prop with animated gauges, pattern-buffer displays, sound effects, and an intentionally overdramatic self-destruct sequence.
 
+Designed and built by Greg Gorman with Max (OpenAI Codex).
+
 ![Transporter console running at 1920×1080](assets/console-screenshot.png)
 
 ## Features
