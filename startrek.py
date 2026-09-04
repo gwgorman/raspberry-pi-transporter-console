@@ -247,22 +247,45 @@ def tape_meter(surface, rect, value, vertical=False, accent=AMBER, background=IN
 def gauge(surface, center, radius, value, label, color):
     start, span = math.radians(140), math.radians(260)
     box = pygame.Rect(center[0] - radius, center[1] - radius, radius * 2, radius * 2)
-    face = pygame.Rect(center[0] - radius - 14, center[1] - radius - 10, radius * 2 + 28, radius * 2 + 32)
-    pygame.draw.rect(surface, BEZEL, face, border_radius=9)
-    pygame.draw.rect(surface, INSTRUMENT, face.inflate(-10, -10), border_radius=6)
-    pygame.draw.arc(surface, (70, 81, 76), box, start, start + span, max(5, radius // 12))
-    pygame.draw.arc(surface, color, box, start, start + span * value, max(5, radius // 12))
-    for i in range(11):
-        a = start + span * i / 10
-        p1 = (center[0] + math.cos(a) * radius * .74, center[1] + math.sin(a) * radius * .74)
+    face = pygame.Rect(center[0] - radius - 19, center[1] - radius - 17, radius * 2 + 38, radius * 2 + 49)
+    pygame.draw.rect(surface, (72, 77, 73), face, border_radius=7)
+    pygame.draw.rect(surface, (132, 137, 128), face, 3, border_radius=7)
+    inner = face.inflate(-16, -16)
+    pygame.draw.rect(surface, INSTRUMENT, inner, border_radius=3)
+    # Four visible fasteners make the meter feel mounted rather than drawn on.
+    for screw in ((face.left + 9, face.top + 9), (face.right - 9, face.top + 9),
+                  (face.left + 9, face.bottom - 9), (face.right - 9, face.bottom - 9)):
+        pygame.draw.circle(surface, (35, 38, 36), screw, 4)
+        pygame.draw.line(surface, (170, 170, 156), (screw[0] - 3, screw[1]), (screw[0] + 3, screw[1]), 1)
+    pygame.draw.arc(surface, CREAM, box, start, start + span, 2)
+    # A small red overload sector replaces the modern colored progress ring.
+    pygame.draw.arc(surface, RED, box, start + span * .82, start + span, 5)
+    for i in range(21):
+        a = start + span * i / 20
+        major = i % 2 == 0
+        p1 = (center[0] + math.cos(a) * radius * (.70 if major else .78), center[1] + math.sin(a) * radius * (.70 if major else .78))
         p2 = (center[0] + math.cos(a) * radius * .92, center[1] + math.sin(a) * radius * .92)
-        pygame.draw.line(surface, CREAM, p1, p2, 2)
+        pygame.draw.line(surface, CREAM, p1, p2, 2 if major else 1)
+        if major:
+            number_pos = (center[0] + math.cos(a) * radius * .58, center[1] + math.sin(a) * radius * .58)
+            txt(surface, i * 5, radius * .105, CREAM, number_pos, "center", True)
     needle = start + span * value
-    end = (center[0] + math.cos(needle) * radius * .66, center[1] + math.sin(needle) * radius * .66)
-    pygame.draw.line(surface, CREAM, center, end, 4)
-    pygame.draw.circle(surface, color, center, 8)
-    txt(surface, f"{int(value * 100):02d}%", radius * .27, WHITE, (center[0], center[1] + radius * .28), "center", True)
-    txt(surface, label, radius * .14, CREAM, (center[0], center[1] + radius * .55), "center", True)
+    tail = (center[0] - math.cos(needle) * radius * .12, center[1] - math.sin(needle) * radius * .12)
+    end = (center[0] + math.cos(needle) * radius * .68, center[1] + math.sin(needle) * radius * .68)
+    pygame.draw.line(surface, (238, 225, 180), tail, end, 3)
+    pygame.draw.circle(surface, (42, 44, 40), center, 9)
+    pygame.draw.circle(surface, (174, 177, 163), center, 9, 2)
+    # Small mechanical-style readout and jewel lamp.
+    readout = pygame.Rect(center[0] - int(radius * .25), center[1] + int(radius * .24), int(radius * .50), int(radius * .22))
+    pygame.draw.rect(surface, (0, 0, 0), readout)
+    pygame.draw.rect(surface, BEZEL, readout, 2)
+    txt(surface, f"{int(value * 100):02d}", radius * .17, CREAM, readout.center, "center", True)
+    pygame.draw.circle(surface, color, (inner.right - 13, inner.top + 13), 5)
+    label_plate = pygame.Rect(center[0] - int(radius * .60), center[1] + int(radius * .54), int(radius * 1.20), int(radius * .18))
+    pygame.draw.rect(surface, (198, 194, 170), label_plate, border_radius=2)
+    txt(surface, label, radius * .105, (22, 24, 22), label_plate.center, "center", True)
+    # Restrained glass reflection along the upper-left edge.
+    pygame.draw.arc(surface, (72, 86, 85), box.inflate(-18, -18), math.radians(188), math.radians(260), 2)
 
 def button(surface, rect, title, subtitle, color, enabled=True, armed=False):
     c = color if enabled else (48, 62, 67)
@@ -303,8 +326,8 @@ def draw_console(surface, now):
     motion = 1.0 if ui_state == "ENERGIZING" else 0.12
     integrity = .965 + math.sin(now * (.9 if motion == 1 else .18)) * .018 * motion
     confinement = .78 + math.sin(now * (.7 if motion == 1 else .14) + 1.2) * .07 * motion
-    gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .28)), int(r["left"].w * .31), integrity, "PATTERN INTEGRITY", GREEN)
-    gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .72)), int(r["left"].w * .31), confinement, "CONFINEMENT BEAM", CYAN)
+    gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .26)), int(r["left"].w * .23), integrity, "PATTERN INTEGRITY", GREEN)
+    gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .75)), int(r["left"].w * .23), confinement, "CONFINEMENT BEAM", CYAN)
 
     panel(surface, r["center"])
     txt(surface, "PATTERN BUFFER 01", h * .026, CREAM, (r["center"].x + 22, r["center"].y + 14), bold=True)
