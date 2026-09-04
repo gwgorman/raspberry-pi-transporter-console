@@ -11,6 +11,7 @@ A full-screen, touch-first sci-fi transporter console built for a Halloween part
 - Spoken ten-second countdown, siren, explosion, and five-press abort sequence
 - Animated meters, indicators, energy bars, coordinates, and pattern-buffer display
 - 1960s spacecraft styling with analog instruments and Apollo-inspired moving-tape meters
+- Status-aware tape illumination: green when ready, amber while active or armed, and red for danger
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch

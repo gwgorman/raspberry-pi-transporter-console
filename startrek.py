@@ -204,11 +204,15 @@ def bar(surface, rect, value, color=CYAN, segments=20):
         r = pygame.Rect(round(rect.x + i * (sw + gap)), rect.y, max(2, round(sw)), rect.h)
         pygame.draw.rect(surface, color if i < active else (28, 58, 68), r, border_radius=3)
 
-def tape_meter(surface, rect, value, vertical=False, accent=AMBER):
+def tape_meter(surface, rect, value, vertical=False, accent=AMBER, background=INSTRUMENT):
     """Apollo-style moving-tape instrument with a fixed datum pointer."""
     pygame.draw.rect(surface, BEZEL, rect, border_radius=3)
     window = rect.inflate(-6, -6)
-    pygame.draw.rect(surface, INSTRUMENT, window)
+    pygame.draw.rect(surface, background, window)
+    # Faint center band suggests the illuminated glass of a mechanical tape window.
+    band = pygame.Rect(window.x, window.centery - max(2, window.h // 14), window.w, max(4, window.h // 7))
+    glow = tuple(min(255, channel + 9) for channel in background)
+    pygame.draw.rect(surface, glow, band)
     value = max(0.0, min(1.0, value))
     steps = 21
     if vertical:
@@ -305,14 +309,22 @@ def draw_console(surface, now):
     panel(surface, r["center"])
     txt(surface, "PATTERN BUFFER 01", h * .026, CREAM, (r["center"].x + 22, r["center"].y + 14), bold=True)
     active_value = transport_progress if ui_state == "ENERGIZING" else .42 + math.sin(now * .12) * .002
+    if ui_state in ("DESTRUCT", "DESTROYED"):
+        tape_background, tape_accent = (55, 5, 8), RED
+    elif ui_state in ("ENERGIZING", "ABORTED") or now < arm_until:
+        tape_background, tape_accent = (48, 34, 4), AMBER
+    elif ui_state in ("READY", "COMPLETE"):
+        tape_background, tape_accent = (4, 35, 21), GREEN
+    else:
+        tape_background, tape_accent = INSTRUMENT, CREAM
     top_strip = pygame.Rect(r["center"].x + 22, r["center"].y + 47, r["center"].w - 44, 38)
-    tape_meter(surface, top_strip, active_value, accent=AMBER)
+    tape_meter(surface, top_strip, active_value, accent=tape_accent, background=tape_background)
     chamber = pygame.Rect(r["center"].x + 62, r["center"].y + 101, r["center"].w - 124, int(r["center"].h * .45))
     pygame.draw.rect(surface, (5, 20, 30), chamber, border_radius=12)
     left_value = transport_progress if ui_state == "ENERGIZING" else .67 + math.sin(now * .10) * .002
     right_value = 1.0 - transport_progress if ui_state == "ENERGIZING" else .36 + math.sin(now * .09 + 2) * .002
-    tape_meter(surface, pygame.Rect(chamber.x - 48, chamber.y, 34, chamber.h), left_value, True, CYAN)
-    tape_meter(surface, pygame.Rect(chamber.right + 14, chamber.y, 34, chamber.h), right_value, True, AMBER)
+    tape_meter(surface, pygame.Rect(chamber.x - 48, chamber.y, 34, chamber.h), left_value, True, tape_accent, tape_background)
+    tape_meter(surface, pygame.Rect(chamber.right + 14, chamber.y, 34, chamber.h), right_value, True, tape_accent, tape_background)
     idle_levels = (.42, .67, .31, .78, .53, .63, .46)
     for i in range(7):
         x = chamber.x + (i + 1) * chamber.w // 8
