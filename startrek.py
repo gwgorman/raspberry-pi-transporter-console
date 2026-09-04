@@ -204,19 +204,41 @@ def bar(surface, rect, value, color=CYAN, segments=20):
         r = pygame.Rect(round(rect.x + i * (sw + gap)), rect.y, max(2, round(sw)), rect.h)
         pygame.draw.rect(surface, color if i < active else (28, 58, 68), r, border_radius=3)
 
-def indicator_strip(surface, rect, values, vertical=False):
-    """Draw a 1960s-style bank of discrete incandescent annunciators."""
-    count, gap = len(values), max(3, min(rect.w, rect.h) // 18)
+def tape_meter(surface, rect, value, vertical=False, accent=AMBER):
+    """Apollo-style moving-tape instrument with a fixed datum pointer."""
+    pygame.draw.rect(surface, BEZEL, rect, border_radius=3)
+    window = rect.inflate(-6, -6)
+    pygame.draw.rect(surface, INSTRUMENT, window)
+    value = max(0.0, min(1.0, value))
+    steps = 21
     if vertical:
-        cell_h = (rect.h - gap * (count - 1)) // count
-        cells = [pygame.Rect(rect.x, rect.y + i * (cell_h + gap), rect.w, cell_h) for i in range(count)]
+        center = window.centery
+        spacing = max(10, window.h // 10)
+        phase = (value * 100) % 10 / 10
+        for i in range(-11, 12):
+            y = round(center + (i + phase) * spacing)
+            if window.top + 2 <= y <= window.bottom - 2:
+                major = i % 5 == 0
+                length = int(window.w * (.58 if major else .34))
+                pygame.draw.line(surface, CREAM, (window.right - length, y), (window.right - 3, y), 2 if major else 1)
+                if major and window.w >= 34:
+                    txt(surface, f"{int(value * 100) - i * 2:02d}", window.w * .20, CREAM, (window.left + 3, y), "midleft", True)
+        pygame.draw.polygon(surface, accent, [(rect.right + 1, center), (rect.right + 10, center - 7), (rect.right + 10, center + 7)])
+        pygame.draw.line(surface, accent, (window.left, center), (window.right, center), 2)
     else:
-        cell_w = (rect.w - gap * (count - 1)) // count
-        cells = [pygame.Rect(rect.x + i * (cell_w + gap), rect.y, cell_w, rect.h) for i in range(count)]
-    for cell, (on, color) in zip(cells, values):
-        pygame.draw.rect(surface, (18, 20, 18), cell)
-        pygame.draw.rect(surface, color if on else (55, 57, 48), cell.inflate(-6, -6), border_radius=2)
-        pygame.draw.rect(surface, BEZEL, cell, 2)
+        center = window.centerx
+        spacing = max(12, window.w // 16)
+        phase = (value * 100) % 10 / 10
+        for i in range(-18, 19):
+            x = round(center + (i + phase) * spacing)
+            if window.left + 2 <= x <= window.right - 2:
+                major = i % 5 == 0
+                length = int(window.h * (.62 if major else .38))
+                pygame.draw.line(surface, CREAM, (x, window.bottom - length), (x, window.bottom - 3), 2 if major else 1)
+                if major:
+                    txt(surface, f"{int(value * 100) + i * 2:02d}", window.h * .24, CREAM, (x, window.top + 2), "midtop", True)
+        pygame.draw.polygon(surface, accent, [(center, rect.bottom + 1), (center - 8, rect.bottom + 10), (center + 8, rect.bottom + 10)])
+        pygame.draw.line(surface, accent, (center, window.top), (center, window.bottom), 2)
 
 def gauge(surface, center, radius, value, label, color):
     start, span = math.radians(140), math.radians(260)
@@ -282,14 +304,15 @@ def draw_console(surface, now):
 
     panel(surface, r["center"])
     txt(surface, "PATTERN BUFFER 01", h * .026, CREAM, (r["center"].x + 22, r["center"].y + 14), bold=True)
-    top_strip = pygame.Rect(r["center"].x + 22, r["center"].y + 47, r["center"].w - 44, 28)
-    top_values = [(True, GREEN), (True, AMBER), (ui_state == "ENERGIZING", RED), (True, CYAN), (int(now * .45) % 2 == 0, AMBER), (True, GREEN), (False, RED), (True, CREAM)]
-    indicator_strip(surface, top_strip, top_values)
-    chamber = pygame.Rect(r["center"].x + 52, r["center"].y + 86, r["center"].w - 104, int(r["center"].h * .49))
+    active_value = transport_progress if ui_state == "ENERGIZING" else .42 + math.sin(now * .12) * .002
+    top_strip = pygame.Rect(r["center"].x + 22, r["center"].y + 47, r["center"].w - 44, 38)
+    tape_meter(surface, top_strip, active_value, accent=AMBER)
+    chamber = pygame.Rect(r["center"].x + 62, r["center"].y + 101, r["center"].w - 124, int(r["center"].h * .45))
     pygame.draw.rect(surface, (5, 20, 30), chamber, border_radius=12)
-    side_values = [(True, GREEN), (True, AMBER), (ui_state == "ENERGIZING", RED), (True, CYAN), (True, GREEN), (False, RED)]
-    indicator_strip(surface, pygame.Rect(chamber.x - 36, chamber.y, 22, chamber.h), side_values, True)
-    indicator_strip(surface, pygame.Rect(chamber.right + 14, chamber.y, 22, chamber.h), list(reversed(side_values)), True)
+    left_value = transport_progress if ui_state == "ENERGIZING" else .67 + math.sin(now * .10) * .002
+    right_value = 1.0 - transport_progress if ui_state == "ENERGIZING" else .36 + math.sin(now * .09 + 2) * .002
+    tape_meter(surface, pygame.Rect(chamber.x - 48, chamber.y, 34, chamber.h), left_value, True, CYAN)
+    tape_meter(surface, pygame.Rect(chamber.right + 14, chamber.y, 34, chamber.h), right_value, True, AMBER)
     idle_levels = (.42, .67, .31, .78, .53, .63, .46)
     for i in range(7):
         x = chamber.x + (i + 1) * chamber.w // 8
