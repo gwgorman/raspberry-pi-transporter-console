@@ -38,6 +38,7 @@ PANEL, PANEL_2 = (14, 31, 45), (18, 42, 58)
 CYAN, BLUE, GREEN = (80, 235, 255), (47, 127, 211), (88, 255, 151)
 AMBER, ORANGE, RED = (255, 190, 61), (255, 119, 46), (255, 55, 62)
 WHITE, MUTED = (223, 243, 247), (108, 151, 164)
+INSTRUMENT, BEZEL, CREAM = (3, 10, 12), (104, 111, 105), (235, 226, 190)
 
 pygame.init()
 try:
@@ -203,22 +204,39 @@ def bar(surface, rect, value, color=CYAN, segments=20):
         r = pygame.Rect(round(rect.x + i * (sw + gap)), rect.y, max(2, round(sw)), rect.h)
         pygame.draw.rect(surface, color if i < active else (28, 58, 68), r, border_radius=3)
 
+def indicator_strip(surface, rect, values, vertical=False):
+    """Draw a 1960s-style bank of discrete incandescent annunciators."""
+    count, gap = len(values), max(3, min(rect.w, rect.h) // 18)
+    if vertical:
+        cell_h = (rect.h - gap * (count - 1)) // count
+        cells = [pygame.Rect(rect.x, rect.y + i * (cell_h + gap), rect.w, cell_h) for i in range(count)]
+    else:
+        cell_w = (rect.w - gap * (count - 1)) // count
+        cells = [pygame.Rect(rect.x + i * (cell_w + gap), rect.y, cell_w, rect.h) for i in range(count)]
+    for cell, (on, color) in zip(cells, values):
+        pygame.draw.rect(surface, (18, 20, 18), cell)
+        pygame.draw.rect(surface, color if on else (55, 57, 48), cell.inflate(-6, -6), border_radius=2)
+        pygame.draw.rect(surface, BEZEL, cell, 2)
+
 def gauge(surface, center, radius, value, label, color):
     start, span = math.radians(140), math.radians(260)
     box = pygame.Rect(center[0] - radius, center[1] - radius, radius * 2, radius * 2)
-    pygame.draw.arc(surface, (36, 72, 83), box, start, start + span, max(5, radius // 12))
+    face = pygame.Rect(center[0] - radius - 14, center[1] - radius - 10, radius * 2 + 28, radius * 2 + 32)
+    pygame.draw.rect(surface, BEZEL, face, border_radius=9)
+    pygame.draw.rect(surface, INSTRUMENT, face.inflate(-10, -10), border_radius=6)
+    pygame.draw.arc(surface, (70, 81, 76), box, start, start + span, max(5, radius // 12))
     pygame.draw.arc(surface, color, box, start, start + span * value, max(5, radius // 12))
     for i in range(11):
         a = start + span * i / 10
         p1 = (center[0] + math.cos(a) * radius * .74, center[1] + math.sin(a) * radius * .74)
         p2 = (center[0] + math.cos(a) * radius * .92, center[1] + math.sin(a) * radius * .92)
-        pygame.draw.line(surface, MUTED, p1, p2, 2)
+        pygame.draw.line(surface, CREAM, p1, p2, 2)
     needle = start + span * value
     end = (center[0] + math.cos(needle) * radius * .66, center[1] + math.sin(needle) * radius * .66)
-    pygame.draw.line(surface, WHITE, center, end, 4)
+    pygame.draw.line(surface, CREAM, center, end, 4)
     pygame.draw.circle(surface, color, center, 8)
     txt(surface, f"{int(value * 100):02d}%", radius * .27, WHITE, (center[0], center[1] + radius * .28), "center", True)
-    txt(surface, label, radius * .14, MUTED, (center[0], center[1] + radius * .55), "center", True)
+    txt(surface, label, radius * .14, CREAM, (center[0], center[1] + radius * .55), "center", True)
 
 def button(surface, rect, title, subtitle, color, enabled=True, armed=False):
     c = color if enabled else (48, 62, 67)
@@ -255,18 +273,32 @@ def draw_console(surface, now):
     txt(surface, ui_state, h * .03, lamp, (r["header"].right - 66, r["header"].centery), "midright", True)
 
     panel(surface, r["left"])
-    integrity = .965 + math.sin(now * 1.4) * .018
-    confinement = .78 + math.sin(now * .83 + 1.2) * .07
+    # Real instruments do not twitch constantly: idle needles drift almost imperceptibly.
+    motion = 1.0 if ui_state == "ENERGIZING" else 0.12
+    integrity = .965 + math.sin(now * (.9 if motion == 1 else .18)) * .018 * motion
+    confinement = .78 + math.sin(now * (.7 if motion == 1 else .14) + 1.2) * .07 * motion
     gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .28)), int(r["left"].w * .31), integrity, "PATTERN INTEGRITY", GREEN)
     gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .72)), int(r["left"].w * .31), confinement, "CONFINEMENT BEAM", CYAN)
 
     panel(surface, r["center"])
-    txt(surface, "PATTERN BUFFER 01", h * .026, MUTED, (r["center"].x + 22, r["center"].y + 16), bold=True)
-    chamber = pygame.Rect(r["center"].x + 24, r["center"].y + 54, r["center"].w - 48, int(r["center"].h * .55))
+    txt(surface, "PATTERN BUFFER 01", h * .026, CREAM, (r["center"].x + 22, r["center"].y + 14), bold=True)
+    top_strip = pygame.Rect(r["center"].x + 22, r["center"].y + 47, r["center"].w - 44, 28)
+    top_values = [(True, GREEN), (True, AMBER), (ui_state == "ENERGIZING", RED), (True, CYAN), (int(now * .45) % 2 == 0, AMBER), (True, GREEN), (False, RED), (True, CREAM)]
+    indicator_strip(surface, top_strip, top_values)
+    chamber = pygame.Rect(r["center"].x + 52, r["center"].y + 86, r["center"].w - 104, int(r["center"].h * .49))
     pygame.draw.rect(surface, (5, 20, 30), chamber, border_radius=12)
+    side_values = [(True, GREEN), (True, AMBER), (ui_state == "ENERGIZING", RED), (True, CYAN), (True, GREEN), (False, RED)]
+    indicator_strip(surface, pygame.Rect(chamber.x - 36, chamber.y, 22, chamber.h), side_values, True)
+    indicator_strip(surface, pygame.Rect(chamber.right + 14, chamber.y, 22, chamber.h), list(reversed(side_values)), True)
+    idle_levels = (.42, .67, .31, .78, .53, .63, .46)
     for i in range(7):
         x = chamber.x + (i + 1) * chamber.w // 8
-        level = .18 + .72 * abs(math.sin(((now * 1.8 + i * .7) % 1) * math.pi))
+        if ui_state == "ENERGIZING":
+            level = .18 + .72 * abs(math.sin(((now * 1.8 + i * .7) % 1) * math.pi))
+        elif ui_state == "COMPLETE":
+            level = .9
+        else:
+            level = idle_levels[i] + math.sin(now * .16 + i) * .008
         top = chamber.bottom - int(chamber.h * level)
         pygame.draw.line(surface, CYAN if i % 2 else AMBER, (x, chamber.bottom - 14), (x, top), 8)
         pygame.draw.circle(surface, WHITE, (x, top), 6)
@@ -286,8 +318,10 @@ def draw_console(surface, now):
     systems = (("HEISENBERG COMP.", GREEN), ("BIOFILTER", GREEN), ("PHASE COILS", CYAN), ("TARGET LOCK", AMBER))
     y = r["right"].y + 68
     for i, (label, color) in enumerate(systems):
-        blink = color if i != 3 or int(now * 2) % 2 else (80, 66, 30)
-        pygame.draw.circle(surface, blink, (r["right"].x + 24, y + 8), 7)
+        blink = color if i != 3 or int(now * .7) % 2 else (80, 66, 30)
+        lamp_rect = pygame.Rect(r["right"].x + 16, y - 2, 22, 18)
+        pygame.draw.rect(surface, BEZEL, lamp_rect)
+        pygame.draw.rect(surface, blink, lamp_rect.inflate(-6, -6))
         txt(surface, label, h * .019, WHITE, (r["right"].x + 42, y - 2), bold=True)
         y += int(h * .052)
     y += 8

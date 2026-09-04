@@ -10,11 +10,14 @@ A full-screen, touch-first sci-fi transporter console built for a Halloween part
 - Protected two-touch **SELF DESTRUCT** control
 - Spoken ten-second countdown, siren, explosion, and five-press abort sequence
 - Animated meters, indicators, energy bars, coordinates, and pattern-buffer display
+- 1960s spacecraft styling with analog instruments and Apollo-inspired annunciator strips
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
 
 The touchscreen is the primary interface. Physical arcade buttons are optional.
+
+At idle, the pattern buffer remains stable and the analog needles drift only slightly, like live electrical instruments. Rapid pattern motion is reserved for an active transport sequence.
 
 ## Hardware used
 
@@ -117,4 +120,3 @@ Keep SSH available during setup. Press `Q` or `Esc` in test mode, or stop the pr
 The original code is released under the MIT License.
 
 This is an unofficial fan-made project inspired by classic science-fiction control panels. *Star Trek* and related names and marks belong to their respective owners. No affiliation or endorsement is claimed. Audio from the television programs or films is not distributed here.
-
