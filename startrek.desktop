@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Star Trek Transporter Console
+Comment=Full-screen Halloween transporter kiosk
+Exec=/usr/bin/python3 /home/ggorman/startrek.py --mode=both
+Path=/home/ggorman
+Terminal=false
+X-GNOME-Autostart-enabled=true

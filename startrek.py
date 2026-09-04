@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""Touch-first Star Trek transporter kiosk for Raspberry Pi."""
+
+import math
+import os
+import sys
+import threading
+import time
+
+import pygame
+
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    GPIO = None
+
+MODE = "both"
+TEST_MODE = "--test" in sys.argv
+WINDOWED = "--windowed" in sys.argv
+for arg in sys.argv:
+    if arg.startswith("--mode="):
+        MODE = arg.split("=", 1)[1].lower()
+if MODE not in ("transporter", "selfdestruct", "both"):
+    raise SystemExit("Use --mode=transporter, --mode=selfdestruct, or --mode=both")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+GREEN_PIN, RED_PIN = 17, 27
+running = True
+state_lock = threading.RLock()
+any_sequence_active = self_destruct_active = abort_triggered = False
+abort_count = 0
+ui_state, status_detail = "READY", "PATTERN BUFFER STANDING BY"
+countdown_value = None
+transport_progress = flash_until = arm_until = 0.0
+
+BLACK, NAVY = (4, 7, 12), (8, 18, 30)
+PANEL, PANEL_2 = (14, 31, 45), (18, 42, 58)
+CYAN, BLUE, GREEN = (80, 235, 255), (47, 127, 211), (88, 255, 151)
+AMBER, ORANGE, RED = (255, 190, 61), (255, 119, 46), (255, 55, 62)
+WHITE, MUTED = (223, 243, 247), (108, 151, 164)
+
+pygame.init()
+try:
+    pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
+except pygame.error as exc:
+    print(f"Audio unavailable: {exc}")
+info = pygame.display.Info()
+native_size = (info.current_w or 1920, info.current_h or 1080)
+flags = pygame.DOUBLEBUF
+screen = pygame.display.set_mode((1280, 720), flags | pygame.RESIZABLE) if WINDOWED else pygame.display.set_mode(native_size, flags | pygame.FULLSCREEN)
+pygame.display.set_caption("USS ENTERPRISE TRANSPORTER CONTROL")
+pygame.mouse.set_visible(TEST_MODE or WINDOWED)
+clock = pygame.time.Clock()
+
+VOICE_CHANNEL = pygame.mixer.Channel(0) if pygame.mixer.get_init() else None
+SIREN_CHANNEL = pygame.mixer.Channel(1) if pygame.mixer.get_init() else None
+if VOICE_CHANNEL:
+    VOICE_CHANNEL.set_volume(1.0)
+if SIREN_CHANNEL:
+    SIREN_CHANNEL.set_volume(0.4)
+
+def asset(name):
+    return os.path.join(BASE_DIR, name)
+
+def load_sound(name):
+    path = asset(name)
+    if not pygame.mixer.get_init() or not os.path.exists(path):
+        print(f"Warning: {name} missing or mixer unavailable")
+        return None
+    try:
+        return pygame.mixer.Sound(path)
+    except pygame.error as exc:
+        print(f"Failed to load {name}: {exc}")
+        return None
+
+transporter_sound = load_sound("transporter.wav")
+siren_sound = load_sound("siren.wav") if MODE in ("selfdestruct", "both") else None
+voice_sounds = {}
+for name in os.listdir(BASE_DIR):
+    if name.startswith("speak_") and name.endswith(".wav"):
+        sound = load_sound(name)
+        if sound:
+            voice_sounds[name[6:-4]] = sound
+siren_stop_event = threading.Event()
+
+def play_voice_wait(key):
+    sound = voice_sounds.get(key)
+    if not sound or not VOICE_CHANNEL:
+        print(f"Missing: speak_{key}.wav")
+        return 0.0
+    VOICE_CHANNEL.play(sound)
+    while VOICE_CHANNEL.get_busy():
+        time.sleep(0.05)
+    return sound.get_length()
+
+def play_siren_loop():
+    if siren_sound and SIREN_CHANNEL:
+        SIREN_CHANNEL.play(siren_sound, loops=-1)
+        siren_stop_event.wait()
+        SIREN_CHANNEL.fadeout(500)
+
+def stop_siren():
+    siren_stop_event.set()
+
+def set_ui(state, detail, countdown=None, progress=None):
+    global ui_state, status_detail, countdown_value, transport_progress
+    with state_lock:
+        ui_state, status_detail, countdown_value = state, detail, countdown
+        if progress is not None:
+            transport_progress = progress
+
+def play_transporter_task():
+    global any_sequence_active
+    with state_lock:
+        if MODE not in ("transporter", "both") or any_sequence_active:
+            return
+        any_sequence_active = True
+    set_ui("ENERGIZING", "MOLECULAR DECOMPOSITION IN PROGRESS", progress=0)
+    if transporter_sound:
+        transporter_sound.play()
+    for i in range(101):
+        set_ui("ENERGIZING", "PATTERN STREAM LOCKED", progress=i / 100.0)
+        time.sleep(0.05)
+    time.sleep(0.6)
+    set_ui("COMPLETE", "TRANSPORT COMPLETE — BUFFER PURGED", progress=1)
+    time.sleep(2.2)
+    with state_lock:
+        any_sequence_active = False
+    set_ui("READY", "PATTERN BUFFER STANDING BY", progress=0)
+
+def self_destruct_task():
+    global any_sequence_active, self_destruct_active, abort_count, abort_triggered, flash_until
+    with state_lock:
+        if MODE not in ("selfdestruct", "both") or any_sequence_active:
+            return
+        any_sequence_active = self_destruct_active = True
+        abort_count, abort_triggered = 0, False
+        siren_stop_event.clear()
+    set_ui("DESTRUCT", "SELF DESTRUCT ACTIVE — PRESS ABORT 5 TIMES")
+    if siren_sound:
+        threading.Thread(target=play_siren_loop, daemon=True).start()
+    play_voice_wait("started")
+    for n in range(10, 0, -1):
+        with state_lock:
+            if abort_triggered:
+                break
+        set_ui("DESTRUCT", "SELF DESTRUCT SEQUENCE ACTIVE", countdown=n)
+        voice_duration = play_voice_wait(str(n))
+        time.sleep(max(0, 1.0 - voice_duration))
+    with state_lock:
+        was_aborted = abort_triggered
+    if was_aborted:
+        play_voice_wait("aborted")
+        stop_siren()
+        set_ui("ABORTED", "SELF DESTRUCT SEQUENCE ABORTED")
+        time.sleep(2.0)
+    else:
+        play_voice_wait("kaboom")
+        stop_siren()
+        flash_until = time.monotonic() + 2.0
+        set_ui("DESTROYED", "CATASTROPHIC CORE BREACH", countdown=0)
+        time.sleep(2.0)
+    with state_lock:
+        self_destruct_active = any_sequence_active = False
+        abort_count = 0
+    set_ui("READY", "PATTERN BUFFER STANDING BY", progress=0)
+
+def trigger_transporter():
+    threading.Thread(target=play_transporter_task, daemon=True).start()
+
+def trigger_self_destruct():
+    global abort_count, abort_triggered
+    with state_lock:
+        if self_destruct_active:
+            abort_count += 1
+            print(f"Abort count: {min(5, abort_count)}/5")
+            if abort_count >= 5:
+                abort_triggered = True
+            return
+        if any_sequence_active:
+            return
+    threading.Thread(target=self_destruct_task, daemon=True).start()
+
+def font(size, bold=False):
+    return pygame.font.SysFont("DejaVu Sans", max(12, int(size)), bold=bold)
+
+def txt(surface, value, size, color, pos, anchor="topleft", bold=False):
+    image = font(size, bold).render(str(value), True, color)
+    rect = image.get_rect()
+    setattr(rect, anchor, pos)
+    surface.blit(image, rect)
+    return rect
+
+def panel(surface, rect, color=PANEL, border=BLUE, radius=18):
+    pygame.draw.rect(surface, color, rect, border_radius=radius)
+    pygame.draw.rect(surface, border, rect, width=2, border_radius=radius)
+
+def bar(surface, rect, value, color=CYAN, segments=20):
+    gap = max(2, rect.w // 140)
+    sw = (rect.w - gap * (segments - 1)) / segments
+    active = round(value * segments)
+    for i in range(segments):
+        r = pygame.Rect(round(rect.x + i * (sw + gap)), rect.y, max(2, round(sw)), rect.h)
+        pygame.draw.rect(surface, color if i < active else (28, 58, 68), r, border_radius=3)
+
+def gauge(surface, center, radius, value, label, color):
+    start, span = math.radians(140), math.radians(260)
+    box = pygame.Rect(center[0] - radius, center[1] - radius, radius * 2, radius * 2)
+    pygame.draw.arc(surface, (36, 72, 83), box, start, start + span, max(5, radius // 12))
+    pygame.draw.arc(surface, color, box, start, start + span * value, max(5, radius // 12))
+    for i in range(11):
+        a = start + span * i / 10
+        p1 = (center[0] + math.cos(a) * radius * .74, center[1] + math.sin(a) * radius * .74)
+        p2 = (center[0] + math.cos(a) * radius * .92, center[1] + math.sin(a) * radius * .92)
+        pygame.draw.line(surface, MUTED, p1, p2, 2)
+    needle = start + span * value
+    end = (center[0] + math.cos(needle) * radius * .66, center[1] + math.sin(needle) * radius * .66)
+    pygame.draw.line(surface, WHITE, center, end, 4)
+    pygame.draw.circle(surface, color, center, 8)
+    txt(surface, f"{int(value * 100):02d}%", radius * .27, WHITE, (center[0], center[1] + radius * .28), "center", True)
+    txt(surface, label, radius * .14, MUTED, (center[0], center[1] + radius * .55), "center", True)
+
+def button(surface, rect, title, subtitle, color, enabled=True, armed=False):
+    c = color if enabled else (48, 62, 67)
+    fill = tuple(max(8, int(x * (.55 if armed else .36))) for x in c)
+    pygame.draw.rect(surface, fill, rect, border_radius=18)
+    pygame.draw.rect(surface, c, rect, 4, border_radius=18)
+    txt(surface, title, rect.h * .25, WHITE if enabled else MUTED, (rect.centerx, rect.centery - rect.h * .08), "center", True)
+    txt(surface, subtitle, rect.h * .11, c, (rect.centerx, rect.centery + rect.h * .23), "center", True)
+
+def layout(size):
+    w, h = size
+    margin, gap = int(w * .018), int(w * .012)
+    header_h, footer_h = int(h * .115), int(h * .205)
+    body_y, body_h = margin + header_h + gap, h - (margin + header_h + gap) - footer_h - margin * 2
+    left_w, right_w = int(w * .28), int(w * .25)
+    center_w = w - margin * 2 - left_w - right_w - gap * 2
+    return {
+        "header": pygame.Rect(margin, margin, w - margin * 2, header_h),
+        "left": pygame.Rect(margin, body_y, left_w, body_h),
+        "center": pygame.Rect(margin + left_w + gap, body_y, center_w, body_h),
+        "right": pygame.Rect(w - margin - right_w, body_y, right_w, body_h),
+        "energize": pygame.Rect(margin, h - margin - footer_h, int(w * .64), footer_h),
+        "destruct": pygame.Rect(margin + int(w * .64) + gap, h - margin - footer_h, w - margin * 2 - int(w * .64) - gap, footer_h),
+    }
+
+def draw_console(surface, now):
+    r, w, h = layout(surface.get_size()), *surface.get_size()
+    surface.fill(RED if now < flash_until else BLACK)
+    panel(surface, r["header"], NAVY, CYAN)
+    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED, (r["header"].x + 24, r["header"].y + 15), bold=True)
+    txt(surface, "TRANSPORTER CONTROL", h * .047, WHITE, (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
+    lamp = GREEN if ui_state in ("READY", "COMPLETE") else RED if ui_state in ("DESTRUCT", "DESTROYED") else AMBER
+    pygame.draw.circle(surface, lamp, (r["header"].right - 38, r["header"].centery), 14)
+    txt(surface, ui_state, h * .03, lamp, (r["header"].right - 66, r["header"].centery), "midright", True)
+
+    panel(surface, r["left"])
+    integrity = .965 + math.sin(now * 1.4) * .018
+    confinement = .78 + math.sin(now * .83 + 1.2) * .07
+    gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .28)), int(r["left"].w * .31), integrity, "PATTERN INTEGRITY", GREEN)
+    gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .72)), int(r["left"].w * .31), confinement, "CONFINEMENT BEAM", CYAN)
+
+    panel(surface, r["center"])
+    txt(surface, "PATTERN BUFFER 01", h * .026, MUTED, (r["center"].x + 22, r["center"].y + 16), bold=True)
+    chamber = pygame.Rect(r["center"].x + 24, r["center"].y + 54, r["center"].w - 48, int(r["center"].h * .55))
+    pygame.draw.rect(surface, (5, 20, 30), chamber, border_radius=12)
+    for i in range(7):
+        x = chamber.x + (i + 1) * chamber.w // 8
+        level = .18 + .72 * abs(math.sin(((now * 1.8 + i * .7) % 1) * math.pi))
+        top = chamber.bottom - int(chamber.h * level)
+        pygame.draw.line(surface, CYAN if i % 2 else AMBER, (x, chamber.bottom - 14), (x, top), 8)
+        pygame.draw.circle(surface, WHITE, (x, top), 6)
+    if ui_state == "ENERGIZING":
+        radius = int(min(chamber.w, chamber.h) * (.08 + .7 * abs(math.sin(transport_progress * math.pi))))
+        pygame.draw.circle(surface, CYAN, chamber.center, radius, max(3, w // 400))
+    read_y = chamber.bottom + 18
+    txt(surface, "TARGET COORDINATES", h * .019, MUTED, (chamber.x, read_y), bold=True)
+    for i, (axis, val) in enumerate(zip("XYZ", ("047.221", "118.093", "006.714"))):
+        x = chamber.x + i * chamber.w // 3
+        txt(surface, axis, h * .019, AMBER, (x, read_y + 28), bold=True)
+        txt(surface, val, h * .029, WHITE, (x + 25, read_y + 24), bold=True)
+    txt(surface, status_detail, h * .019, lamp, (r["center"].centerx, r["center"].bottom - 20), "midbottom", True)
+
+    panel(surface, r["right"])
+    txt(surface, "SYSTEM STATUS", h * .026, WHITE, (r["right"].x + 20, r["right"].y + 18), bold=True)
+    systems = (("HEISENBERG COMP.", GREEN), ("BIOFILTER", GREEN), ("PHASE COILS", CYAN), ("TARGET LOCK", AMBER))
+    y = r["right"].y + 68
+    for i, (label, color) in enumerate(systems):
+        blink = color if i != 3 or int(now * 2) % 2 else (80, 66, 30)
+        pygame.draw.circle(surface, blink, (r["right"].x + 24, y + 8), 7)
+        txt(surface, label, h * .019, WHITE, (r["right"].x + 42, y - 2), bold=True)
+        y += int(h * .052)
+    y += 8
+    for label, value, color in (("MATTER STREAM", .88, CYAN), ("PHASE GAIN", .73, AMBER), ("ENERGY MATRIX", .94, GREEN)):
+        txt(surface, label, h * .016, MUTED, (r["right"].x + 20, y), bold=True)
+        bar(surface, pygame.Rect(r["right"].x + 20, y + 24, r["right"].w - 40, 16), value + math.sin(now + y) * .025, color, 14)
+        y += int(h * .075)
+    if countdown_value is not None:
+        txt(surface, countdown_value, h * .16, RED, (r["right"].centerx, r["right"].bottom - 58), "center", True)
+    elif self_destruct_active:
+        txt(surface, f"ABORT {abort_count}/5", h * .038, RED, (r["right"].centerx, r["right"].bottom - 42), "center", True)
+
+    button(surface, r["energize"], "ENERGIZE", "TOUCH TO INITIATE TRANSPORT", CYAN, MODE in ("transporter", "both") and not any_sequence_active, ui_state == "ENERGIZING")
+    if self_destruct_active:
+        button(surface, r["destruct"], "ABORT", "PRESS 5 TIMES", RED, True, True)
+    elif now < arm_until:
+        button(surface, r["destruct"], "CONFIRM", "SELF DESTRUCT", RED, not any_sequence_active, True)
+    else:
+        button(surface, r["destruct"], "SELF DESTRUCT", "TOUCH TO ARM", ORANGE, MODE in ("selfdestruct", "both") and not any_sequence_active)
+    if TEST_MODE:
+        txt(surface, "TEST  G: ENERGIZE   R: DESTRUCT/ABORT   Q/ESC: QUIT", h * .016, MUTED, (w // 2, h - 3), "midbottom")
+
+def handle_touch(pos, now):
+    global arm_until
+    r = layout(screen.get_size())
+    if r["energize"].collidepoint(pos):
+        trigger_transporter()
+    elif r["destruct"].collidepoint(pos):
+        if self_destruct_active:
+            trigger_self_destruct()
+        elif MODE in ("selfdestruct", "both") and not any_sequence_active:
+            if now < arm_until:
+                arm_until = 0
+                trigger_self_destruct()
+            else:
+                arm_until = now + 4.0
+
+if not TEST_MODE and GPIO:
+    GPIO.setmode(GPIO.BCM)
+    if MODE in ("transporter", "both"):
+        GPIO.setup(GREEN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.add_event_detect(GREEN_PIN, GPIO.FALLING, callback=lambda _: trigger_transporter(), bouncetime=300)
+    if MODE in ("selfdestruct", "both"):
+        GPIO.setup(RED_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.add_event_detect(RED_PIN, GPIO.FALLING, callback=lambda _: trigger_self_destruct(), bouncetime=300)
+elif not TEST_MODE:
+    print("RPi.GPIO unavailable; touchscreen controls remain active")
+
+print(f"MODE: {MODE.upper()} | TEST: {TEST_MODE} | DISPLAY: {screen.get_size()}")
+try:
+    while running:
+        now = time.monotonic()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_g:
+                    trigger_transporter()
+                elif event.key == pygame.K_r:
+                    trigger_self_destruct()
+                elif event.key in (pygame.K_q, pygame.K_ESCAPE):
+                    running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not getattr(event, "touch", False):
+                handle_touch(event.pos, now)
+            elif event.type == pygame.FINGERDOWN:
+                handle_touch((int(event.x * screen.get_width()), int(event.y * screen.get_height())), now)
+        if arm_until and now >= arm_until:
+            arm_until = 0
+        draw_console(screen, now)
+        pygame.display.flip()
+        clock.tick(60)
+finally:
+    running = False
+    stop_siren()
+    if pygame.mixer.get_init():
+        pygame.mixer.stop()
+        pygame.mixer.quit()
+    pygame.quit()
+    if not TEST_MODE and GPIO:
+        GPIO.cleanup()
+    print("KIOSK OFFLINE")
