@@ -3,6 +3,7 @@
 
 import math
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -32,6 +33,8 @@ abort_count = 0
 ui_state, status_detail = "READY", "PATTERN BUFFER STANDING BY"
 countdown_value = None
 transport_progress = flash_until = arm_until = 0.0
+shutdown_hold_started = shutdown_confirm_until = 0.0
+shutdown_pending = False
 
 BLACK, NAVY = (4, 7, 12), (8, 18, 30)
 PANEL, PANEL_2 = (14, 31, 45), (18, 42, 58)
@@ -320,7 +323,7 @@ def layout(size):
     body_y, body_h = margin + header_h + gap, h - (margin + header_h + gap) - footer_h - margin * 2
     left_w, right_w = int(w * .28), int(w * .25)
     center_w = w - margin * 2 - left_w - right_w - gap * 2
-    return {
+    result = {
         "header": pygame.Rect(margin, margin, w - margin * 2, header_h),
         "left": pygame.Rect(margin, body_y, left_w, body_h),
         "center": pygame.Rect(margin + left_w + gap, body_y, center_w, body_h),
@@ -328,6 +331,44 @@ def layout(size):
         "energize": pygame.Rect(margin, h - margin - footer_h, int(w * .64), footer_h),
         "destruct": pygame.Rect(margin + int(w * .64) + gap, h - margin - footer_h, w - margin * 2 - int(w * .64) - gap, footer_h),
     }
+    result["maker_plate"] = pygame.Rect(result["right"].x + 62, result["right"].bottom - 31, result["right"].w - 124, 18)
+    return result
+
+def shutdown_layout(size):
+    w, h = size
+    return {
+        "confirm": pygame.Rect(int(w * .12), int(h * .61), int(w * .46), int(h * .20)),
+        "cancel": pygame.Rect(int(w * .62), int(h * .61), int(w * .26), int(h * .20)),
+    }
+
+def request_shutdown():
+    global shutdown_pending
+    shutdown_pending = True
+    print("SAFE SHUTDOWN REQUESTED")
+    time.sleep(0.8)
+    result = subprocess.run(["sudo", "-n", "/usr/bin/systemctl", "poweroff"], check=False)
+    if result.returncode:
+        shutdown_pending = False
+        print(f"Shutdown failed with status {result.returncode}")
+
+def draw_shutdown_confirmation(surface, now):
+    w, h = surface.get_size()
+    overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 225))
+    surface.blit(overlay, (0, 0))
+    border = pygame.Rect(int(w * .08), int(h * .17), int(w * .84), int(h * .68))
+    panel(surface, border, (22, 25, 24), BEZEL, 10)
+    txt(surface, "GROUND OPERATIONS", h * .028, AMBER, (w // 2, int(h * .24)), "center", True)
+    title = "SHUTTING DOWN" if shutdown_pending else "POWER DOWN CONSOLE?"
+    txt(surface, title, h * .068, CREAM, (w // 2, int(h * .36)), "center", True)
+    detail = "WAIT FOR THE DISPLAY TO GO DARK BEFORE REMOVING POWER" if shutdown_pending else "THIS SAFELY STOPS THE RASPBERRY PI"
+    txt(surface, detail, h * .022, MUTED, (w // 2, int(h * .47)), "center", True)
+    if not shutdown_pending:
+        controls = shutdown_layout((w, h))
+        button(surface, controls["confirm"], "SHUT DOWN", "CONFIRM SAFE POWER-OFF", RED, True, True)
+        button(surface, controls["cancel"], "CANCEL", "RETURN TO CONSOLE", CYAN, True)
+        remaining = max(0, int(shutdown_confirm_until - now) + 1)
+        txt(surface, f"CANCELS AUTOMATICALLY IN {remaining}", h * .016, MUTED, (w // 2, int(h * .83)), "center", True)
 
 def draw_console(surface, now):
     r, w, h = layout(surface.get_size()), *surface.get_size()
@@ -405,10 +446,13 @@ def draw_console(surface, now):
         bar(surface, pygame.Rect(r["right"].x + 20, y + 24, r["right"].w - 40, 16), value + math.sin(now + y) * .025, color, 14)
         y += int(h * .075)
     if countdown_value is None and not self_destruct_active:
-        maker_plate = pygame.Rect(r["right"].x + 62, r["right"].bottom - 31, r["right"].w - 124, 18)
+        maker_plate = r["maker_plate"]
         pygame.draw.rect(surface, (72, 77, 73), maker_plate, border_radius=2)
         pygame.draw.rect(surface, (18, 21, 20), maker_plate.inflate(-4, -4), border_radius=1)
         txt(surface, "GREG // MAX  •  TRANSPORTER LAB  •  2026", h * .0095, CREAM, maker_plate.center, "center", True)
+        if shutdown_hold_started:
+            hold_progress = min(1.0, (now - shutdown_hold_started) / 5.0)
+            pygame.draw.rect(surface, AMBER, (maker_plate.x, maker_plate.bottom + 3, int(maker_plate.w * hold_progress), 3))
     if countdown_value is not None:
         txt(surface, countdown_value, h * .16, RED, (r["right"].centerx, r["right"].bottom - 58), "center", True)
     elif self_destruct_active:
@@ -425,7 +469,14 @@ def draw_console(surface, now):
         txt(surface, "TEST  G: ENERGIZE   R: DESTRUCT/ABORT   Q/ESC: QUIT", h * .016, MUTED, (w // 2, h - 3), "midbottom")
 
 def handle_touch(pos, now):
-    global arm_until
+    global arm_until, shutdown_confirm_until
+    if shutdown_confirm_until > now:
+        controls = shutdown_layout(screen.get_size())
+        if controls["confirm"].collidepoint(pos) and not shutdown_pending:
+            threading.Thread(target=request_shutdown, daemon=True).start()
+        elif controls["cancel"].collidepoint(pos):
+            shutdown_confirm_until = 0
+        return
     r = layout(screen.get_size())
     if r["energize"].collidepoint(pos):
         trigger_transporter()
@@ -438,6 +489,19 @@ def handle_touch(pos, now):
                 trigger_self_destruct()
             else:
                 arm_until = now + 4.0
+
+def handle_press(pos, now):
+    global shutdown_hold_started
+    r = layout(screen.get_size())
+    # The visible plate stays subtle; its invisible hold target is more forgiving.
+    if not any_sequence_active and r["maker_plate"].inflate(70, 46).collidepoint(pos):
+        shutdown_hold_started = now
+    else:
+        handle_touch(pos, now)
+
+def handle_release():
+    global shutdown_hold_started
+    shutdown_hold_started = 0
 
 if not TEST_MODE and GPIO:
     GPIO.setmode(GPIO.BCM)
@@ -465,12 +529,23 @@ try:
                 elif event.key in (pygame.K_q, pygame.K_ESCAPE):
                     running = False
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not getattr(event, "touch", False):
-                handle_touch(event.pos, now)
+                handle_press(event.pos, now)
+            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and not getattr(event, "touch", False):
+                handle_release()
             elif event.type == pygame.FINGERDOWN:
-                handle_touch((int(event.x * screen.get_width()), int(event.y * screen.get_height())), now)
+                handle_press((int(event.x * screen.get_width()), int(event.y * screen.get_height())), now)
+            elif event.type == pygame.FINGERUP:
+                handle_release()
+        if shutdown_hold_started and now - shutdown_hold_started >= 5.0:
+            shutdown_hold_started = 0
+            shutdown_confirm_until = now + 10.0
         if arm_until and now >= arm_until:
             arm_until = 0
+        if shutdown_confirm_until and now >= shutdown_confirm_until and not shutdown_pending:
+            shutdown_confirm_until = 0
         draw_console(screen, now)
+        if shutdown_confirm_until > now or shutdown_pending:
+            draw_shutdown_confirmation(screen, now)
         pygame.display.flip()
         clock.tick(60)
 finally:
