@@ -295,6 +295,24 @@ def button(surface, rect, title, subtitle, color, enabled=True, armed=False):
     txt(surface, title, rect.h * .25, WHITE if enabled else MUTED, (rect.centerx, rect.centery - rect.h * .08), "center", True)
     txt(surface, subtitle, rect.h * .11, c, (rect.centerx, rect.centery + rect.h * .23), "center", True)
 
+def status_lamp(surface, rect, label, state, color, on=True):
+    """Panel-mounted jewel lamp with bezel and engraved identification plate."""
+    pygame.draw.rect(surface, (75, 80, 76), rect, border_radius=4)
+    pygame.draw.rect(surface, (145, 148, 137), rect, 2, border_radius=4)
+    inset = rect.inflate(-8, -8)
+    pygame.draw.rect(surface, (7, 12, 13), inset, border_radius=2)
+    lamp_center = (inset.x + 19, inset.centery)
+    pygame.draw.circle(surface, (168, 171, 158), lamp_center, 12)
+    pygame.draw.circle(surface, (36, 39, 36), lamp_center, 9)
+    lens = color if on else tuple(max(8, channel // 5) for channel in color)
+    pygame.draw.circle(surface, lens, lamp_center, 7)
+    pygame.draw.circle(surface, tuple(min(255, channel + 70) for channel in lens), (lamp_center[0] - 2, lamp_center[1] - 2), 2)
+    plate = pygame.Rect(inset.x + 39, inset.y + 4, inset.w - 45, inset.h - 8)
+    pygame.draw.rect(surface, (201, 198, 176), plate, border_radius=2)
+    pygame.draw.rect(surface, (57, 60, 55), plate, 1, border_radius=2)
+    txt(surface, label, rect.h * .21, (22, 24, 22), (plate.x + 7, plate.centery - rect.h * .09), "midleft", True)
+    txt(surface, state, rect.h * .15, (72, 66, 48), (plate.x + 7, plate.centery + rect.h * .15), "midleft", True)
+
 def layout(size):
     w, h = size
     margin, gap = int(w * .018), int(w * .012)
@@ -373,16 +391,15 @@ def draw_console(surface, now):
 
     panel(surface, r["right"])
     txt(surface, "SYSTEM STATUS", h * .026, WHITE, (r["right"].x + 20, r["right"].y + 18), bold=True)
-    systems = (("HEISENBERG COMP.", GREEN), ("BIOFILTER", GREEN), ("PHASE COILS", CYAN), ("TARGET LOCK", AMBER))
-    y = r["right"].y + 68
-    for i, (label, color) in enumerate(systems):
-        blink = color if i != 3 or int(now * .7) % 2 else (80, 66, 30)
-        lamp_rect = pygame.Rect(r["right"].x + 16, y - 2, 22, 18)
-        pygame.draw.rect(surface, BEZEL, lamp_rect)
-        pygame.draw.rect(surface, blink, lamp_rect.inflate(-6, -6))
-        txt(surface, label, h * .019, WHITE, (r["right"].x + 42, y - 2), bold=True)
-        y += int(h * .052)
-    y += 8
+    systems = (("HEISENBERG COMP.", "NOMINAL", GREEN), ("BIOFILTER", "ACTIVE", GREEN),
+               ("PHASE COILS", "SYNCHRONIZED", CYAN), ("TARGET LOCK", "ACQUIRED", AMBER))
+    y = r["right"].y + 60
+    row_h = int(h * .052)
+    for i, (label, state, color) in enumerate(systems):
+        lamp_on = i != 3 or int(now * .7) % 2 == 0
+        status_lamp(surface, pygame.Rect(r["right"].x + 15, y, r["right"].w - 30, row_h - 4), label, state, color, lamp_on)
+        y += row_h + 4
+    y += 5
     for label, value, color in (("MATTER STREAM", .88, CYAN), ("PHASE GAIN", .73, AMBER), ("ENERGY MATRIX", .94, GREEN)):
         txt(surface, label, h * .016, MUTED, (r["right"].x + 20, y), bold=True)
         bar(surface, pygame.Rect(r["right"].x + 20, y + 24, r["right"].w - 40, 16), value + math.sin(now + y) * .025, color, 14)

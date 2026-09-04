@@ -13,6 +13,7 @@ A full-screen, touch-first sci-fi transporter console built for a Halloween part
 - 1960s spacecraft styling with analog instruments and Apollo-inspired moving-tape meters
 - Status-aware tape illumination: green when ready, amber while active or armed, and red for danger
 - Panel-mounted analog meters with hardware bezels, calibration scales, needles, and jewel lamps
+- Bezel-mounted status annunciators with engraved labels and state legends
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
