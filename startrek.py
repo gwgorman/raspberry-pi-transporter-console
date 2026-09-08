@@ -190,6 +190,8 @@ def self_destruct_task():
         flash_until = time.monotonic() + 2.0
         set_ui("DESTROYED", "CATASTROPHIC CORE BREACH", countdown=0)
         time.sleep(2.0)
+        set_ui("SAD_MAC", "SYSTEM ERROR", countdown=None)
+        time.sleep(5.0)
     with state_lock:
         self_destruct_active = any_sequence_active = False
         abort_count = 0
@@ -575,6 +577,45 @@ def draw_console(surface, now):
     if TEST_MODE:
         txt(surface, "TEST  G: ENERGIZE   R: DESTRUCT/ABORT   Q/ESC: QUIT", h * .016, MUTED, (w // 2, h - 3), "midbottom")
 
+def draw_sad_mac(surface):
+    """Full-screen monochrome homage to the original compact-Mac crash icon."""
+    w, h = surface.get_size()
+    paper, ink = (190, 190, 184), (17, 17, 16)
+    surface.fill(paper)
+    scale = max(3, int(min(w, h) * .011))
+    mac_w, mac_h = 28 * scale, 31 * scale
+    x, y = (w - mac_w) // 2, int(h * .20)
+
+    # Chunky pixel-built compact Macintosh case and screen.
+    pygame.draw.rect(surface, ink, (x, y, mac_w, mac_h))
+    pygame.draw.rect(surface, paper, (x + 2 * scale, y + 2 * scale,
+                                      mac_w - 4 * scale, mac_h - 5 * scale))
+    pygame.draw.rect(surface, ink, (x + 5 * scale, y + 5 * scale,
+                                    18 * scale, 14 * scale))
+    pygame.draw.rect(surface, paper, (x + 7 * scale, y + 7 * scale,
+                                      14 * scale, 10 * scale))
+
+    # Pixel eyes and unmistakable downturned mouth.
+    for eye_x in (x + 10 * scale, x + 18 * scale):
+        pygame.draw.line(surface, ink, (eye_x - scale, y + 9 * scale),
+                         (eye_x + scale, y + 11 * scale), scale)
+        pygame.draw.line(surface, ink, (eye_x + scale, y + 9 * scale),
+                         (eye_x - scale, y + 11 * scale), scale)
+    mouth = [(x + 10 * scale, y + 15 * scale),
+             (x + 12 * scale, y + 13 * scale),
+             (x + 16 * scale, y + 13 * scale),
+             (x + 18 * scale, y + 15 * scale)]
+    pygame.draw.lines(surface, ink, False, mouth, scale)
+    pygame.draw.rect(surface, ink, (x + 4 * scale, y + 24 * scale,
+                                    20 * scale, 2 * scale))
+    pygame.draw.rect(surface, ink, (x + 20 * scale, y + 27 * scale,
+                                    3 * scale, scale))
+
+    txt(surface, "0000000F", scale * 2.0, ink,
+        (w // 2, y + mac_h + 4 * scale), "midtop", True)
+    txt(surface, "SYSTEM FAILURE", scale * 1.45, ink,
+        (w // 2, y + mac_h + 8 * scale), "midtop", True)
+
 def handle_touch(pos, now):
     global arm_until, shutdown_confirm_until
     if shutdown_confirm_until > now:
@@ -650,7 +691,10 @@ try:
             arm_until = 0
         if shutdown_confirm_until and now >= shutdown_confirm_until and not shutdown_pending:
             shutdown_confirm_until = 0
-        draw_console(screen, now)
+        if ui_state == "SAD_MAC":
+            draw_sad_mac(screen)
+        else:
+            draw_console(screen, now)
         if shutdown_confirm_until > now or shutdown_pending:
             draw_shutdown_confirmation(screen, now)
         pygame.display.flip()

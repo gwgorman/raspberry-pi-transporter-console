@@ -22,6 +22,7 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Broad, asynchronous tape movement at idle that stabilizes with fast regulator corrections during transport
 - Coordinated acquisition, confinement, dematerialization, transfer, and rematerialization phases
 - Slowly searching target coordinates that lock solid throughout transport
+- Five-second monochrome Sad Mac crash gag after an unaborted core breach
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
