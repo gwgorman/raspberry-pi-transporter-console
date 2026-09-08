@@ -132,7 +132,10 @@ def play_transporter_task():
         if progress >= 1.0:
             break
         time.sleep(1 / 30)
-    if transport_channel and transport_channel.get_busy():
+    # Normal 10.8-second assets contain their own fade. Protect against a much
+    # longer replacement WAV continuing after the visual sequence has ended.
+    if (transport_channel and transport_channel.get_busy() and
+            transporter_sound.get_length() > TRANSPORT_DURATION + 1.0):
         transport_channel.fadeout(800)
     time.sleep(0.6)
     set_ui("COMPLETE", "TRANSPORT COMPLETE — BUFFER PURGED", progress=1)
