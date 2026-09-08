@@ -19,6 +19,7 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Bezel-mounted status annunciators with engraved labels and state legends
 - Slowly wandering idle instruments and retro edgewise meters instead of modern progress bars
 - Broad analog idle sweeps below the red sector, rising toward caution during transport
+- Broad, asynchronous tape movement at idle that stabilizes with fast regulator corrections during transport
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch

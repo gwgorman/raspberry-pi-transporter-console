@@ -420,7 +420,8 @@ def draw_console(surface, now):
     txt(surface, ui_state, h * .03, lamp, (r["header"].right - 66, r["header"].centery), "midright", True)
 
     panel(surface, r["left"])
-    # Real instruments do not twitch constantly: idle needles drift almost imperceptibly.
+    # Idle instruments make broad, slow mechanical sweeps; operating indications
+    # settle into tighter bands with quick regulator corrections.
     if ui_state == "ENERGIZING":
         # Both systems build toward the caution sector as transport proceeds.
         integrity = .68 + transport_progress * .25 + math.sin(now * .85) * .025
@@ -438,7 +439,12 @@ def draw_console(surface, now):
 
     panel(surface, r["center"])
     txt(surface, "PATTERN BUFFER 01", h * .026, CREAM, (r["center"].x + 22, r["center"].y + 14), bold=True)
-    active_value = transport_progress if ui_state == "ENERGIZING" else .42 + math.sin(now * .16) * .018
+    operating = ui_state == "ENERGIZING"
+    if operating:
+        fast_trim = math.sin(now * 8.2) * .018 + math.sin(now * 13.7 + .8) * .009
+        active_value = .70 + transport_progress * .18 + fast_trim
+    else:
+        active_value = .50 + math.sin(now * .24) * .25 + math.sin(now * .09 + .5) * .06
     if ui_state in ("DESTRUCT", "DESTROYED"):
         tape_background, tape_accent = (55, 5, 8), RED
     elif ui_state in ("ENERGIZING", "ABORTED") or now < arm_until:
@@ -451,19 +457,24 @@ def draw_console(surface, now):
     tape_meter(surface, top_strip, active_value, accent=tape_accent, background=tape_background)
     chamber = pygame.Rect(r["center"].x + 62, r["center"].y + 101, r["center"].w - 124, int(r["center"].h * .45))
     pygame.draw.rect(surface, (5, 20, 30), chamber, border_radius=12)
-    left_value = transport_progress if ui_state == "ENERGIZING" else .67 + math.sin(now * .14) * .022
-    right_value = 1.0 - transport_progress if ui_state == "ENERGIZING" else .36 + math.sin(now * .11 + 2) * .020
+    if operating:
+        left_value = .76 + transport_progress * .12 + math.sin(now * 9.1 + .4) * .025
+        right_value = .71 + transport_progress * .15 + math.sin(now * 10.4 + 2) * .022
+    else:
+        left_value = .54 + math.sin(now * .21 + .4) * .28 + math.sin(now * .08) * .05
+        right_value = .48 + math.sin(now * .18 + 2) * .27 + math.sin(now * .07 + 1.1) * .05
     tape_meter(surface, pygame.Rect(chamber.x - 48, chamber.y, 34, chamber.h), left_value, True, tape_accent, tape_background)
     tape_meter(surface, pygame.Rect(chamber.right + 14, chamber.y, 34, chamber.h), right_value, True, tape_accent, tape_background)
     idle_levels = (.42, .67, .31, .78, .53, .63, .46)
     for i in range(7):
         x = chamber.x + (i + 1) * chamber.w // 8
-        if ui_state == "ENERGIZING":
-            level = .18 + .72 * abs(math.sin(((now * 1.8 + i * .7) % 1) * math.pi))
+        if operating:
+            level = .73 + transport_progress * .12 + math.sin(now * (8.0 + i * .31) + i) * .035
         elif ui_state == "COMPLETE":
             level = .9
         else:
-            level = idle_levels[i] + math.sin(now * .20 + i) * .035
+            level = idle_levels[i] + math.sin(now * (.18 + i * .012) + i) * .19 + math.sin(now * .065 + i * .8) * .045
+        level = max(.08, min(.96, level))
         top = chamber.bottom - int(chamber.h * level)
         pygame.draw.line(surface, CYAN if i % 2 else AMBER, (x, chamber.bottom - 14), (x, top), 8)
         pygame.draw.circle(surface, WHITE, (x, top), 6)
@@ -489,9 +500,14 @@ def draw_console(surface, now):
         status_lamp(surface, pygame.Rect(r["right"].x + 15, y, r["right"].w - 30, row_h - 4), label, state, color, lamp_on)
         y += row_h + 4
     y += 5
-    edge_values = (("MATTER STREAM", .84 + math.sin(now * .27) * .055, CYAN),
-                   ("PHASE GAIN", .70 + math.sin(now * .21 + 1.7) * .065, AMBER),
-                   ("ENERGY MATRIX", .90 + math.sin(now * .17 + 3.1) * .045, GREEN))
+    if operating:
+        edge_values = (("MATTER STREAM", .79 + transport_progress * .10 + math.sin(now * 9.3) * .025, CYAN),
+                       ("PHASE GAIN", .74 + transport_progress * .08 + math.sin(now * 11.1 + 1.7) * .022, AMBER),
+                       ("ENERGY MATRIX", .82 + transport_progress * .09 + math.sin(now * 8.7 + 3.1) * .020, GREEN))
+    else:
+        edge_values = (("MATTER STREAM", .55 + math.sin(now * .22) * .25 + math.sin(now * .07) * .05, CYAN),
+                       ("PHASE GAIN", .50 + math.sin(now * .19 + 1.7) * .27 + math.sin(now * .08) * .04, AMBER),
+                       ("ENERGY MATRIX", .58 + math.sin(now * .17 + 3.1) * .24 + math.sin(now * .06 + .3) * .05, GREEN))
     meter_h = int(h * .061)
     for label, value, color in edge_values:
         edge_meter(surface, pygame.Rect(r["right"].x + 15, y, r["right"].w - 30, meter_h), value, label, color)
