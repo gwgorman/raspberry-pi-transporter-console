@@ -17,6 +17,7 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Status-aware tape illumination: green when ready, amber while active or armed, and red for danger
 - Panel-mounted analog meters with hardware bezels, calibration scales, needles, and jewel lamps
 - Bezel-mounted status annunciators with engraved labels and state legends
+- Slowly wandering idle instruments and retro edgewise meters instead of modern progress bars
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch

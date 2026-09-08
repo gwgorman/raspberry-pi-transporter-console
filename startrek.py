@@ -219,6 +219,33 @@ def bar(surface, rect, value, color=CYAN, segments=20):
         r = pygame.Rect(round(rect.x + i * (sw + gap)), rect.y, max(2, round(sw)), rect.h)
         pygame.draw.rect(surface, color if i < active else (28, 58, 68), r, border_radius=3)
 
+def edge_meter(surface, rect, value, label, color):
+    """Retro edgewise panel meter with a moving pointer over a fixed scale."""
+    value = max(0.0, min(1.0, value))
+    pygame.draw.rect(surface, (72, 77, 73), rect, border_radius=4)
+    pygame.draw.rect(surface, (145, 148, 137), rect, 2, border_radius=4)
+    inner = rect.inflate(-8, -8)
+    pygame.draw.rect(surface, INSTRUMENT, inner, border_radius=2)
+    plate = pygame.Rect(inner.x + 5, inner.y + 4, int(inner.w * .43), 17)
+    pygame.draw.rect(surface, (201, 198, 176), plate, border_radius=2)
+    txt(surface, label, rect.h * .16, (22, 24, 22), (plate.x + 5, plate.centery), "midleft", True)
+    readout = pygame.Rect(inner.right - 46, inner.y + 4, 40, 17)
+    pygame.draw.rect(surface, (0, 0, 0), readout)
+    pygame.draw.rect(surface, BEZEL, readout, 1)
+    txt(surface, f"{int(value * 100):02d}", rect.h * .17, CREAM, readout.center, "center", True)
+    track = pygame.Rect(inner.x + 8, inner.bottom - 23, inner.w - 16, 17)
+    pygame.draw.rect(surface, (2, 6, 7), track)
+    for i in range(21):
+        x = track.x + i * track.w / 20
+        major = i % 5 == 0
+        pygame.draw.line(surface, CREAM, (x, track.bottom - (12 if major else 7)), (x, track.bottom - 2), 2 if major else 1)
+    pointer_x = int(track.x + value * track.w)
+    pygame.draw.line(surface, color, (pointer_x, track.y - 2), (pointer_x, track.bottom), 3)
+    pygame.draw.polygon(surface, color, [(pointer_x, track.y - 2), (pointer_x - 6, track.y - 9), (pointer_x + 6, track.y - 9)])
+    jewel = (inner.right - 60, inner.y + 12)
+    pygame.draw.circle(surface, BEZEL, jewel, 7)
+    pygame.draw.circle(surface, color, jewel, 4)
+
 def tape_meter(surface, rect, value, vertical=False, accent=AMBER, background=INSTRUMENT):
     """Apollo-style moving-tape instrument with a fixed datum pointer."""
     pygame.draw.rect(surface, BEZEL, rect, border_radius=3)
@@ -394,15 +421,15 @@ def draw_console(surface, now):
 
     panel(surface, r["left"])
     # Real instruments do not twitch constantly: idle needles drift almost imperceptibly.
-    motion = 1.0 if ui_state == "ENERGIZING" else 0.12
-    integrity = .965 + math.sin(now * (.9 if motion == 1 else .18)) * .018 * motion
-    confinement = .78 + math.sin(now * (.7 if motion == 1 else .14) + 1.2) * .07 * motion
+    motion = 1.0 if ui_state == "ENERGIZING" else 0.42
+    integrity = .955 + math.sin(now * (.9 if motion == 1 else .22)) * .028 * motion
+    confinement = .76 + math.sin(now * (.7 if motion == 1 else .18) + 1.2) * .09 * motion
     gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .26)), int(r["left"].w * .23), integrity, "PATTERN INTEGRITY", GREEN)
     gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .75)), int(r["left"].w * .23), confinement, "CONFINEMENT BEAM", CYAN)
 
     panel(surface, r["center"])
     txt(surface, "PATTERN BUFFER 01", h * .026, CREAM, (r["center"].x + 22, r["center"].y + 14), bold=True)
-    active_value = transport_progress if ui_state == "ENERGIZING" else .42 + math.sin(now * .12) * .002
+    active_value = transport_progress if ui_state == "ENERGIZING" else .42 + math.sin(now * .16) * .018
     if ui_state in ("DESTRUCT", "DESTROYED"):
         tape_background, tape_accent = (55, 5, 8), RED
     elif ui_state in ("ENERGIZING", "ABORTED") or now < arm_until:
@@ -415,8 +442,8 @@ def draw_console(surface, now):
     tape_meter(surface, top_strip, active_value, accent=tape_accent, background=tape_background)
     chamber = pygame.Rect(r["center"].x + 62, r["center"].y + 101, r["center"].w - 124, int(r["center"].h * .45))
     pygame.draw.rect(surface, (5, 20, 30), chamber, border_radius=12)
-    left_value = transport_progress if ui_state == "ENERGIZING" else .67 + math.sin(now * .10) * .002
-    right_value = 1.0 - transport_progress if ui_state == "ENERGIZING" else .36 + math.sin(now * .09 + 2) * .002
+    left_value = transport_progress if ui_state == "ENERGIZING" else .67 + math.sin(now * .14) * .022
+    right_value = 1.0 - transport_progress if ui_state == "ENERGIZING" else .36 + math.sin(now * .11 + 2) * .020
     tape_meter(surface, pygame.Rect(chamber.x - 48, chamber.y, 34, chamber.h), left_value, True, tape_accent, tape_background)
     tape_meter(surface, pygame.Rect(chamber.right + 14, chamber.y, 34, chamber.h), right_value, True, tape_accent, tape_background)
     idle_levels = (.42, .67, .31, .78, .53, .63, .46)
@@ -427,7 +454,7 @@ def draw_console(surface, now):
         elif ui_state == "COMPLETE":
             level = .9
         else:
-            level = idle_levels[i] + math.sin(now * .16 + i) * .008
+            level = idle_levels[i] + math.sin(now * .20 + i) * .035
         top = chamber.bottom - int(chamber.h * level)
         pygame.draw.line(surface, CYAN if i % 2 else AMBER, (x, chamber.bottom - 14), (x, top), 8)
         pygame.draw.circle(surface, WHITE, (x, top), 6)
@@ -453,10 +480,13 @@ def draw_console(surface, now):
         status_lamp(surface, pygame.Rect(r["right"].x + 15, y, r["right"].w - 30, row_h - 4), label, state, color, lamp_on)
         y += row_h + 4
     y += 5
-    for label, value, color in (("MATTER STREAM", .88, CYAN), ("PHASE GAIN", .73, AMBER), ("ENERGY MATRIX", .94, GREEN)):
-        txt(surface, label, h * .016, MUTED, (r["right"].x + 20, y), bold=True)
-        bar(surface, pygame.Rect(r["right"].x + 20, y + 24, r["right"].w - 40, 16), value + math.sin(now + y) * .025, color, 14)
-        y += int(h * .075)
+    edge_values = (("MATTER STREAM", .84 + math.sin(now * .27) * .055, CYAN),
+                   ("PHASE GAIN", .70 + math.sin(now * .21 + 1.7) * .065, AMBER),
+                   ("ENERGY MATRIX", .90 + math.sin(now * .17 + 3.1) * .045, GREEN))
+    meter_h = int(h * .061)
+    for label, value, color in edge_values:
+        edge_meter(surface, pygame.Rect(r["right"].x + 15, y, r["right"].w - 30, meter_h), value, label, color)
+        y += meter_h + 8
     if countdown_value is None and not self_destruct_active:
         maker_plate = r["maker_plate"]
         pygame.draw.rect(surface, (72, 77, 73), maker_plate, border_radius=2)
