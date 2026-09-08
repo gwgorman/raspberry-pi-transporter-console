@@ -59,10 +59,31 @@ clock = pygame.time.Clock()
 
 VOICE_CHANNEL = pygame.mixer.Channel(0) if pygame.mixer.get_init() else None
 SIREN_CHANNEL = pygame.mixer.Channel(1) if pygame.mixer.get_init() else None
+CHIME_CHANNEL = pygame.mixer.Channel(2) if pygame.mixer.get_init() else None
 if VOICE_CHANNEL:
     VOICE_CHANNEL.set_volume(1.0)
 if SIREN_CHANNEL:
     SIREN_CHANNEL.set_volume(0.4)
+if CHIME_CHANNEL:
+    CHIME_CHANNEL.set_volume(0.48)
+
+def make_sad_mac_chime():
+    """Synthesize an original short two-tone retro computer error bonk."""
+    if not pygame.mixer.get_init():
+        return None
+    sample_rate, duration = 22050, .62
+    samples = bytearray()
+    for index in range(int(sample_rate * duration)):
+        t = index / sample_rate
+        frequency = 392.0 if t < .23 else 293.66
+        local_t = t if t < .23 else t - .23
+        decay = math.exp(-local_t * (8.5 if t < .23 else 6.5))
+        # A quiet fundamental plus its second harmonic gives a small speaker-like thunk.
+        wave = math.sin(2 * math.pi * frequency * t) * .78
+        wave += math.sin(2 * math.pi * frequency * 2 * t) * .22
+        value = int(max(-1.0, min(1.0, wave * decay)) * 15000)
+        samples.extend(value.to_bytes(2, "little", signed=True))
+    return pygame.mixer.Sound(buffer=bytes(samples))
 
 def asset(name):
     return os.path.join(BASE_DIR, name)
@@ -80,6 +101,7 @@ def load_sound(name):
 
 transporter_sound = load_sound("transporter.wav")
 siren_sound = load_sound("siren.wav") if MODE in ("selfdestruct", "both") else None
+sad_mac_chime = make_sad_mac_chime()
 voice_sounds = {}
 for name in os.listdir(BASE_DIR):
     if name.startswith("speak_") and name.endswith(".wav"):
@@ -190,6 +212,8 @@ def self_destruct_task():
         flash_until = time.monotonic() + 2.0
         set_ui("EXPLOSION", "CATASTROPHIC CORE BREACH", countdown=None)
         time.sleep(2.0)
+        if sad_mac_chime and CHIME_CHANNEL:
+            CHIME_CHANNEL.play(sad_mac_chime)
         set_ui("SAD_MAC", "SYSTEM ERROR", countdown=None)
         time.sleep(5.0)
     with state_lock:
