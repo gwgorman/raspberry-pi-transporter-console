@@ -421,9 +421,18 @@ def draw_console(surface, now):
 
     panel(surface, r["left"])
     # Real instruments do not twitch constantly: idle needles drift almost imperceptibly.
-    motion = 1.0 if ui_state == "ENERGIZING" else 0.42
-    integrity = .955 + math.sin(now * (.9 if motion == 1 else .22)) * .028 * motion
-    confinement = .76 + math.sin(now * (.7 if motion == 1 else .18) + 1.2) * .09 * motion
+    if ui_state == "ENERGIZING":
+        # Both systems build toward the caution sector as transport proceeds.
+        integrity = .68 + transport_progress * .25 + math.sin(now * .85) * .025
+        confinement = .58 + transport_progress * .30 + math.sin(now * .72 + 1.2) * .035
+    elif ui_state == "COMPLETE":
+        integrity, confinement = .94, .86
+    else:
+        # Independent overlapping cycles create visible mechanical wander without twitching.
+        integrity = .62 + math.sin(now * .28) * .12 + math.sin(now * .11 + .7) * .035
+        confinement = .55 + math.sin(now * .23 + 1.2) * .14 + math.sin(now * .09) * .03
+    integrity = max(.08, min(.98, integrity))
+    confinement = max(.08, min(.98, confinement))
     gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .26)), int(r["left"].w * .23), integrity, "PATTERN INTEGRITY", GREEN)
     gauge(surface, (r["left"].centerx, r["left"].y + int(r["left"].h * .75)), int(r["left"].w * .23), confinement, "CONFINEMENT BEAM", CYAN)
 
