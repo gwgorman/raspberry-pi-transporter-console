@@ -608,9 +608,7 @@ def draw_console(surface, now):
         if shutdown_hold_started:
             hold_progress = min(1.0, (now - shutdown_hold_started) / 5.0)
             pygame.draw.rect(surface, AMBER, (maker_plate.x, maker_plate.bottom + 3, int(maker_plate.w * hold_progress), 3))
-    if countdown_value is not None:
-        txt(surface, countdown_value, h * .16, RED, (r["right"].centerx, r["right"].bottom - 58), "center", True)
-    elif self_destruct_active:
+    if countdown_value is None and self_destruct_active:
         txt(surface, f"ABORT {abort_count}/5", h * .038, RED, (r["right"].centerx, r["right"].bottom - 42), "center", True)
 
     button(surface, r["energize"], "ENERGIZE", "TOUCH TO INITIATE TRANSPORT", CYAN, MODE in ("transporter", "both") and not any_sequence_active, ui_state == "ENERGIZING")
