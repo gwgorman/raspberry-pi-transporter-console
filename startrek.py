@@ -188,7 +188,7 @@ def self_destruct_task():
         play_voice_wait("kaboom")
         stop_siren()
         flash_until = time.monotonic() + 2.0
-        set_ui("DESTROYED", "CATASTROPHIC CORE BREACH", countdown=0)
+        set_ui("EXPLOSION", "CATASTROPHIC CORE BREACH", countdown=None)
         time.sleep(2.0)
         set_ui("SAD_MAC", "SYSTEM ERROR", countdown=None)
         time.sleep(5.0)
@@ -616,6 +616,43 @@ def draw_sad_mac(surface):
     txt(surface, "SYSTEM FAILURE", scale * 1.45, ink,
         (w // 2, y + mac_h + 8 * scale), "midtop", True)
 
+def draw_mushroom_cloud(surface, now):
+    """Animated mid-century mushroom-cloud silhouette for the core breach."""
+    w, h = surface.get_size()
+    pulse = .94 + math.sin(now * 14.0) * .06
+    surface.fill((65, 4, 0))
+
+    # Concentric blast glow keeps the transition theatrical at kiosk distance.
+    center = (w // 2, int(h * .54))
+    for radius, color in ((int(h * .52 * pulse), (122, 12, 0)),
+                          (int(h * .39 * pulse), (212, 48, 0)),
+                          (int(h * .27 * pulse), (255, 143, 0)),
+                          (int(h * .16 * pulse), (255, 229, 126))):
+        pygame.draw.circle(surface, color, center, radius)
+
+    ink = (24, 12, 8)
+    stem_w = int(w * .105 * pulse)
+    stem = pygame.Rect(w // 2 - stem_w // 2, int(h * .40), stem_w, int(h * .43))
+    pygame.draw.rect(surface, ink, stem)
+    pygame.draw.polygon(surface, ink, ((stem.left, stem.bottom),
+                                       (int(w * .39), int(h * .94)),
+                                       (int(w * .61), int(h * .94)),
+                                       (stem.right, stem.bottom)))
+
+    # Overlapping lobes form a recognizable boiling cloud without an asset file.
+    cloud_y = int(h * .35)
+    lobes = ((-.17, .01, .105), (-.10, -.06, .125), (0, -.10, .15),
+             (.10, -.06, .125), (.17, .01, .105), (-.08, .07, .13),
+             (.08, .07, .13))
+    for dx, dy, radius in lobes:
+        pygame.draw.circle(surface, ink,
+                           (w // 2 + int(w * dx), cloud_y + int(h * dy)),
+                           int(h * radius * pulse))
+    pygame.draw.ellipse(surface, ink, (int(w * .27), int(h * .29),
+                                       int(w * .46), int(h * .22)))
+    txt(surface, "CATASTROPHIC CORE BREACH", h * .037, (255, 231, 172),
+        (w // 2, int(h * .08)), "center", True)
+
 def handle_touch(pos, now):
     global arm_until, shutdown_confirm_until
     if shutdown_confirm_until > now:
@@ -691,7 +728,9 @@ try:
             arm_until = 0
         if shutdown_confirm_until and now >= shutdown_confirm_until and not shutdown_pending:
             shutdown_confirm_until = 0
-        if ui_state == "SAD_MAC":
+        if ui_state == "EXPLOSION":
+            draw_mushroom_cloud(screen, now)
+        elif ui_state == "SAD_MAC":
             draw_sad_mac(screen)
         else:
             draw_console(screen, now)
