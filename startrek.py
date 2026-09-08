@@ -114,6 +114,20 @@ def set_ui(state, detail, countdown=None, progress=None):
         if progress is not None:
             transport_progress = progress
 
+def transport_phase(progress):
+    """Return one coordinated phase name for every transport indication."""
+    if progress < .12:
+        return "TARGET ACQUISITION"
+    if progress < .28:
+        return "CONFINEMENT BEAM LOCKED"
+    if progress < .52:
+        return "MOLECULAR DEMATERIALIZATION"
+    if progress < .78:
+        return "PATTERN TRANSFER IN PROGRESS"
+    if progress < .94:
+        return "MOLECULAR REMATERIALIZATION"
+    return "PATTERN COHERENCE VERIFIED"
+
 def play_transporter_task():
     global any_sequence_active
     with state_lock:
@@ -128,7 +142,7 @@ def play_transporter_task():
     while True:
         elapsed = time.monotonic() - sequence_started
         progress = min(1.0, elapsed / TRANSPORT_DURATION)
-        set_ui("ENERGIZING", "PATTERN STREAM LOCKED", progress=progress)
+        set_ui("ENERGIZING", transport_phase(progress), progress=progress)
         if progress >= 1.0:
             break
         time.sleep(1 / 30)
@@ -483,7 +497,15 @@ def draw_console(surface, now):
         pygame.draw.circle(surface, CYAN, chamber.center, radius, max(3, w // 400))
     read_y = chamber.bottom + 18
     txt(surface, "TARGET COORDINATES", h * .019, MUTED, (chamber.x, read_y), bold=True)
-    for i, (axis, val) in enumerate(zip("XYZ", ("047.221", "118.093", "006.714"))):
+    if operating or ui_state == "COMPLETE":
+        coordinate_values = (47.221, 118.093, 6.714)
+    else:
+        # Slow sensor-search drift stops the instant target acquisition begins.
+        coordinate_values = (47.221 + math.sin(now * .17) * .024,
+                             118.093 + math.sin(now * .13 + 1.4) * .031,
+                             6.714 + math.sin(now * .19 + 2.2) * .018)
+    for i, (axis, coordinate) in enumerate(zip("XYZ", coordinate_values)):
+        val = f"{coordinate:07.3f}"
         x = chamber.x + i * chamber.w // 3
         txt(surface, axis, h * .019, AMBER, (x, read_y + 28), bold=True)
         txt(surface, val, h * .029, WHITE, (x + 25, read_y + 24), bold=True)
@@ -491,12 +513,30 @@ def draw_console(surface, now):
 
     panel(surface, r["right"])
     txt(surface, "SYSTEM STATUS", h * .026, WHITE, (r["right"].x + 20, r["right"].y + 18), bold=True)
-    systems = (("HEISENBERG COMP.", "NOMINAL", GREEN), ("BIOFILTER", "ACTIVE", GREEN),
-               ("PHASE COILS", "SYNCHRONIZED", CYAN), ("TARGET LOCK", "ACQUIRED", AMBER))
+    if operating:
+        phase = transport_progress
+        systems = (("HEISENBERG COMP.", "COMPENSATING", GREEN, phase >= .12),
+                   ("BIOFILTER", "SCREENING", GREEN, phase >= .28),
+                   ("PHASE COILS", "ENERGIZED", CYAN, phase >= .12),
+                   ("TARGET LOCK", "HARD LOCK", AMBER, True))
+    elif ui_state == "COMPLETE":
+        systems = (("HEISENBERG COMP.", "NOMINAL", GREEN, True),
+                   ("BIOFILTER", "CLEAR", GREEN, True),
+                   ("PHASE COILS", "STANDBY", CYAN, True),
+                   ("TARGET LOCK", "RELEASED", AMBER, False))
+    elif ui_state in ("DESTRUCT", "DESTROYED"):
+        systems = (("HEISENBERG COMP.", "OFFLINE", RED, False),
+                   ("BIOFILTER", "BYPASSED", RED, False),
+                   ("PHASE COILS", "INHIBITED", RED, False),
+                   ("TARGET LOCK", "RELEASED", RED, False))
+    else:
+        systems = (("HEISENBERG COMP.", "NOMINAL", GREEN, True),
+                   ("BIOFILTER", "ACTIVE", GREEN, True),
+                   ("PHASE COILS", "SYNCHRONIZED", CYAN, True),
+                   ("TARGET LOCK", "ACQUIRED", AMBER, True))
     y = r["right"].y + 60
     row_h = int(h * .052)
-    for i, (label, state, color) in enumerate(systems):
-        lamp_on = i != 3 or int(now * .7) % 2 == 0
+    for label, state, color, lamp_on in systems:
         status_lamp(surface, pygame.Rect(r["right"].x + 15, y, r["right"].w - 30, row_h - 4), label, state, color, lamp_on)
         y += row_h + 4
     y += 5
