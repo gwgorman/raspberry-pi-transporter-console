@@ -25,6 +25,8 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Five-second monochrome Sad Mac crash gag after an unaborted core breach
 - Animated mushroom-cloud blast synchronized to the spoken kaboom
 - Original two-tone retro computer bonk as the Sad Mac appears
+- Low-frequency core-breach impact layered beneath the spoken kaboom
+- Full-screen pulsing red self-destruct numerals with persistent abort guidance
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch

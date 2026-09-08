@@ -60,12 +60,15 @@ clock = pygame.time.Clock()
 VOICE_CHANNEL = pygame.mixer.Channel(0) if pygame.mixer.get_init() else None
 SIREN_CHANNEL = pygame.mixer.Channel(1) if pygame.mixer.get_init() else None
 CHIME_CHANNEL = pygame.mixer.Channel(2) if pygame.mixer.get_init() else None
+BOOM_CHANNEL = pygame.mixer.Channel(3) if pygame.mixer.get_init() else None
 if VOICE_CHANNEL:
     VOICE_CHANNEL.set_volume(1.0)
 if SIREN_CHANNEL:
     SIREN_CHANNEL.set_volume(0.4)
 if CHIME_CHANNEL:
     CHIME_CHANNEL.set_volume(0.48)
+if BOOM_CHANNEL:
+    BOOM_CHANNEL.set_volume(0.72)
 
 def make_sad_mac_chime():
     """Synthesize an original short two-tone retro computer error bonk."""
@@ -82,6 +85,22 @@ def make_sad_mac_chime():
         wave = math.sin(2 * math.pi * frequency * t) * .78
         wave += math.sin(2 * math.pi * frequency * 2 * t) * .22
         value = int(max(-1.0, min(1.0, wave * decay)) * 15000)
+        samples.extend(value.to_bytes(2, "little", signed=True))
+    return pygame.mixer.Sound(buffer=bytes(samples))
+
+def make_core_breach_thump():
+    """Synthesize a short low impact to sit underneath the spoken kaboom."""
+    if not pygame.mixer.get_init():
+        return None
+    sample_rate, duration = 22050, 1.15
+    samples = bytearray()
+    for index in range(int(sample_rate * duration)):
+        t = index / sample_rate
+        frequency = 72.0 - 34.0 * (t / duration)
+        envelope = min(1.0, t * 35.0) * math.exp(-t * 3.8)
+        rumble = math.sin(2 * math.pi * frequency * t)
+        rumble += .38 * math.sin(2 * math.pi * frequency * .47 * t)
+        value = int(max(-1.0, min(1.0, rumble * envelope)) * 19000)
         samples.extend(value.to_bytes(2, "little", signed=True))
     return pygame.mixer.Sound(buffer=bytes(samples))
 
@@ -102,6 +121,7 @@ def load_sound(name):
 transporter_sound = load_sound("transporter.wav")
 siren_sound = load_sound("siren.wav") if MODE in ("selfdestruct", "both") else None
 sad_mac_chime = make_sad_mac_chime()
+core_breach_thump = make_core_breach_thump()
 voice_sounds = {}
 for name in os.listdir(BASE_DIR):
     if name.startswith("speak_") and name.endswith(".wav"):
@@ -207,6 +227,8 @@ def self_destruct_task():
         set_ui("ABORTED", "SELF DESTRUCT SEQUENCE ABORTED")
         time.sleep(2.0)
     else:
+        if core_breach_thump and BOOM_CHANNEL:
+            BOOM_CHANNEL.play(core_breach_thump)
         play_voice_wait("kaboom")
         stop_siren()
         flash_until = time.monotonic() + 2.0
@@ -677,6 +699,23 @@ def draw_mushroom_cloud(surface, now):
     txt(surface, "CATASTROPHIC CORE BREACH", h * .037, (255, 231, 172),
         (w // 2, int(h * .08)), "center", True)
 
+def draw_destruct_countdown(surface, now):
+    """Turn the entire console into a high-visibility red countdown display."""
+    w, h = surface.get_size()
+    pulse = (math.sin(now * 7.0) + 1.0) / 2.0
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((110 + int(45 * pulse), 0, 0, 145 + int(35 * pulse)))
+    surface.blit(veil, (0, 0))
+    border = max(12, int(min(w, h) * .022))
+    pygame.draw.rect(surface, (255, 35, 35), (border // 2, border // 2,
+                                             w - border, h - border), border)
+    txt(surface, "SELF DESTRUCT", h * .075, WHITE,
+        (w // 2, int(h * .09)), "center", True)
+    txt(surface, countdown_value, h * .66, (255, 225, 210),
+        (w // 2, int(h * .50)), "center", True)
+    txt(surface, f"ABORT — PRESS RED CONTROL 5 TIMES     {abort_count}/5", h * .038,
+        WHITE, (w // 2, int(h * .91)), "center", True)
+
 def handle_touch(pos, now):
     global arm_until, shutdown_confirm_until
     if shutdown_confirm_until > now:
@@ -758,6 +797,8 @@ try:
             draw_sad_mac(screen)
         else:
             draw_console(screen, now)
+            if countdown_value is not None:
+                draw_destruct_countdown(screen, now)
         if shutdown_confirm_until > now or shutdown_pending:
             draw_shutdown_confirmation(screen, now)
         pygame.display.flip()
