@@ -9,6 +9,7 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 ## Features
 
 - Large touchscreen **ENERGIZE** control with animated transporter sequence
+- Ten-second synchronized transport cycle with a gentle audio fade at completion
 - Protected two-touch **SELF DESTRUCT** control
 - Spoken ten-second countdown, siren, explosion, and five-press abort sequence
 - Animated meters, indicators, energy bars, coordinates, and pattern-buffer display

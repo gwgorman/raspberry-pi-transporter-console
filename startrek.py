@@ -26,6 +26,7 @@ if MODE not in ("transporter", "selfdestruct", "both"):
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 GREEN_PIN, RED_PIN = 17, 27
+TRANSPORT_DURATION = 10.0
 running = True
 state_lock = threading.RLock()
 any_sequence_active = self_destruct_active = abort_triggered = False
@@ -120,11 +121,19 @@ def play_transporter_task():
             return
         any_sequence_active = True
     set_ui("ENERGIZING", "MOLECULAR DECOMPOSITION IN PROGRESS", progress=0)
+    transport_channel = None
     if transporter_sound:
-        transporter_sound.play()
-    for i in range(101):
-        set_ui("ENERGIZING", "PATTERN STREAM LOCKED", progress=i / 100.0)
-        time.sleep(0.05)
+        transport_channel = transporter_sound.play()
+    sequence_started = time.monotonic()
+    while True:
+        elapsed = time.monotonic() - sequence_started
+        progress = min(1.0, elapsed / TRANSPORT_DURATION)
+        set_ui("ENERGIZING", "PATTERN STREAM LOCKED", progress=progress)
+        if progress >= 1.0:
+            break
+        time.sleep(1 / 30)
+    if transport_channel and transport_channel.get_busy():
+        transport_channel.fadeout(800)
     time.sleep(0.6)
     set_ui("COMPLETE", "TRANSPORT COMPLETE — BUFFER PURGED", progress=1)
     time.sleep(2.2)
