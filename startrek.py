@@ -711,10 +711,26 @@ def draw_destruct_countdown(surface, now):
                                              w - border, h - border), border)
     txt(surface, "SELF DESTRUCT", h * .075, WHITE,
         (w // 2, int(h * .09)), "center", True)
-    txt(surface, countdown_value, h * .66, (255, 225, 210),
-        (w // 2, int(h * .50)), "center", True)
-    txt(surface, f"ABORT — PRESS RED CONTROL 5 TIMES     {abort_count}/5", h * .038,
-        WHITE, (w // 2, int(h * .91)), "center", True)
+    txt(surface, countdown_value, h * .58, (255, 225, 210),
+        (w // 2, int(h * .45)), "center", True)
+
+    # Draw this in precisely the same rectangle used by handle_touch().
+    # The visual control and its live touchscreen target therefore cannot drift apart.
+    abort_rect = layout((w, h))["destruct"].inflate(-10, -10)
+    pygame.draw.rect(surface, (64 + int(30 * pulse), 0, 0), abort_rect, border_radius=18)
+    pygame.draw.rect(surface, (255, 215, 205), abort_rect,
+                     7 + int(4 * pulse), border_radius=18)
+    txt(surface, "ABORT", abort_rect.h * .30, WHITE,
+        (abort_rect.centerx, abort_rect.centery - abort_rect.h * .13), "center", True)
+    txt(surface, f"PRESS 5 TIMES  •  {abort_count}/5", abort_rect.h * .13,
+        (255, 205, 190), (abort_rect.centerx, abort_rect.centery + abort_rect.h * .22),
+        "center", True)
+
+    instruction_x = layout((w, h))["energize"].centerx
+    txt(surface, "SELF DESTRUCT ACTIVE", h * .038, WHITE,
+        (instruction_x, int(h * .88)), "center", True)
+    txt(surface, "TOUCH THE ILLUMINATED ABORT CONTROL", h * .022,
+        (255, 205, 190), (instruction_x, int(h * .935)), "center", True)
 
 def handle_touch(pos, now):
     global arm_until, shutdown_confirm_until

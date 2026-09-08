@@ -27,6 +27,7 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Original two-tone retro computer bonk as the Sad Mac appears
 - Low-frequency core-breach impact layered beneath the spoken kaboom
 - Full-screen pulsing red self-destruct numerals with persistent abort guidance
+- Illuminated countdown-screen ABORT control aligned exactly with its live touch target
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
