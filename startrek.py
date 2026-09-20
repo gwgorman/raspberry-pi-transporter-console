@@ -3,6 +3,7 @@
 
 import math
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -36,6 +37,10 @@ countdown_value = None
 transport_progress = flash_until = arm_until = 0.0
 shutdown_hold_started = shutdown_confirm_until = 0.0
 shutdown_pending = False
+afg_dragging = False
+afg_value = 72
+afg_pending = None
+afg_event = threading.Event()
 
 BLACK, NAVY = (4, 7, 12), (8, 18, 30)
 PANEL, PANEL_2 = (14, 31, 45), (18, 42, 58)
@@ -56,6 +61,51 @@ screen = pygame.display.set_mode((1280, 720), flags | pygame.RESIZABLE) if WINDO
 pygame.display.set_caption("USS ENTERPRISE TRANSPORTER CONTROL")
 pygame.mouse.set_visible(TEST_MODE or WINDOWED)
 clock = pygame.time.Clock()
+
+def read_system_volume(default=72):
+    """Read the real PipeWire default-sink volume, clamped to 0–100%."""
+    try:
+        result = subprocess.run(
+            ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
+            check=True, capture_output=True, text=True, timeout=2)
+        match = re.search(r"Volume:\s*([0-9.]+)", result.stdout)
+        if match:
+            return max(0, min(100, round(float(match.group(1)) * 100)))
+    except (FileNotFoundError, subprocess.SubprocessError, ValueError) as exc:
+        print(f"AFG read unavailable: {exc}")
+    return default
+
+afg_value = read_system_volume()
+
+def system_volume_worker():
+    """Coalesce slider motion and apply it to the real PipeWire output."""
+    global afg_pending
+    while running:
+        afg_event.wait()
+        afg_event.clear()
+        with state_lock:
+            value, afg_pending = afg_pending, None
+        if value is None:
+            continue
+        try:
+            subprocess.run(
+                ["wpctl", "set-volume", "--limit", "1.0",
+                 "@DEFAULT_AUDIO_SINK@", f"{value}%"],
+                check=True, timeout=2)
+            subprocess.run(
+                ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@",
+                 "1" if value == 0 else "0"],
+                check=True, timeout=2)
+        except (FileNotFoundError, subprocess.SubprocessError) as exc:
+            print(f"AFG write failed: {exc}")
+
+def set_system_volume(value):
+    """Update the AFG readout immediately and queue one system-volume write."""
+    global afg_value, afg_pending
+    value = max(0, min(100, int(round(value))))
+    with state_lock:
+        afg_value = afg_pending = value
+    afg_event.set()
 
 VOICE_CHANNEL = pygame.mixer.Channel(0) if pygame.mixer.get_init() else None
 SIREN_CHANNEL = pygame.mixer.Channel(1) if pygame.mixer.get_init() else None
@@ -433,6 +483,9 @@ def layout(size):
         "destruct": pygame.Rect(margin + int(w * .64) + gap, h - margin - footer_h, w - margin * 2 - int(w * .64) - gap, footer_h),
     }
     result["maker_plate"] = pygame.Rect(result["right"].x + 62, result["right"].bottom - 31, result["right"].w - 124, 18)
+    result["afg"] = pygame.Rect(result["center"].x + 62,
+                                result["center"].bottom - int(h * .115),
+                                result["center"].w - 124, int(h * .075))
     return result
 
 def shutdown_layout(size):
@@ -557,6 +610,32 @@ def draw_console(surface, now):
         x = chamber.x + i * chamber.w // 3
         txt(surface, axis, h * .019, AMBER, (x, read_y + 28), bold=True)
         txt(surface, val, h * .029, WHITE, (x + 25, read_y + 24), bold=True)
+
+    afg = r["afg"]
+    pygame.draw.rect(surface, (70, 76, 72), afg, border_radius=5)
+    pygame.draw.rect(surface, (153, 157, 143), afg, 2, border_radius=5)
+    inner = afg.inflate(-10, -10)
+    pygame.draw.rect(surface, (4, 12, 15), inner, border_radius=3)
+    label_color = RED if afg_value == 0 else CREAM
+    txt(surface, "ACOUSTIC FIELD GAIN", h * .015, label_color,
+        (inner.x + 8, inner.y + 5), bold=True)
+    readout = "AURAL FIELD MUTED" if afg_value == 0 else f"AFG {afg_value:03d}"
+    txt(surface, readout, h * .017, label_color,
+        (inner.right - 8, inner.y + 5), "topright", True)
+    track = pygame.Rect(inner.x + 9, inner.bottom - int(inner.h * .36),
+                        inner.w - 18, max(8, int(inner.h * .16)))
+    pygame.draw.rect(surface, (25, 37, 39), track, border_radius=track.h // 2)
+    fill_w = int(track.w * afg_value / 100)
+    if fill_w:
+        pygame.draw.rect(surface, CYAN, (track.x, track.y, fill_w, track.h),
+                         border_radius=track.h // 2)
+    for tick in range(0, 101, 10):
+        tick_x = track.x + int(track.w * tick / 100)
+        pygame.draw.line(surface, CREAM, (tick_x, track.bottom + 2),
+                         (tick_x, track.bottom + 6), 1)
+    knob_x = track.x + int(track.w * afg_value / 100)
+    pygame.draw.circle(surface, (38, 42, 40), (knob_x, track.centery), track.h + 5)
+    pygame.draw.circle(surface, label_color, (knob_x, track.centery), track.h + 5, 3)
     txt(surface, status_detail, h * .019, lamp, (r["center"].centerx, r["center"].bottom - 20), "midbottom", True)
 
     panel(surface, r["right"])
@@ -740,7 +819,10 @@ def handle_touch(pos, now):
             shutdown_confirm_until = 0
         return
     r = layout(screen.get_size())
-    if r["energize"].collidepoint(pos):
+    if r["afg"].collidepoint(pos) and countdown_value is None:
+        track = r["afg"].inflate(-28, -10)
+        set_system_volume((pos[0] - track.x) * 100 / max(1, track.w))
+    elif r["energize"].collidepoint(pos):
         trigger_transporter()
     elif r["destruct"].collidepoint(pos):
         if self_destruct_active:
@@ -753,8 +835,13 @@ def handle_touch(pos, now):
                 arm_until = now + 4.0
 
 def handle_press(pos, now):
-    global shutdown_hold_started
+    global shutdown_hold_started, afg_dragging
     r = layout(screen.get_size())
+    if (r["afg"].collidepoint(pos) and countdown_value is None and
+            shutdown_confirm_until <= now):
+        afg_dragging = True
+        handle_touch(pos, now)
+        return
     # The visible plate stays subtle; its invisible hold target is more forgiving.
     if not any_sequence_active and r["maker_plate"].inflate(70, 46).collidepoint(pos):
         shutdown_hold_started = now
@@ -762,8 +849,9 @@ def handle_press(pos, now):
         handle_touch(pos, now)
 
 def handle_release():
-    global shutdown_hold_started
+    global shutdown_hold_started, afg_dragging
     shutdown_hold_started = 0
+    afg_dragging = False
 
 if not TEST_MODE and GPIO:
     GPIO.setmode(GPIO.BCM)
@@ -775,6 +863,8 @@ if not TEST_MODE and GPIO:
         GPIO.add_event_detect(RED_PIN, GPIO.FALLING, callback=lambda _: trigger_self_destruct(), bouncetime=300)
 elif not TEST_MODE:
     print("RPi.GPIO unavailable; touchscreen controls remain active")
+
+threading.Thread(target=system_volume_worker, daemon=True).start()
 
 print(f"MODE: {MODE.upper()} | TEST: {TEST_MODE} | DISPLAY: {screen.get_size()}")
 try:
@@ -794,8 +884,12 @@ try:
                 handle_press(event.pos, now)
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and not getattr(event, "touch", False):
                 handle_release()
+            elif event.type == pygame.MOUSEMOTION and afg_dragging:
+                handle_touch(event.pos, now)
             elif event.type == pygame.FINGERDOWN:
                 handle_press((int(event.x * screen.get_width()), int(event.y * screen.get_height())), now)
+            elif event.type == pygame.FINGERMOTION and afg_dragging:
+                handle_touch((int(event.x * screen.get_width()), int(event.y * screen.get_height())), now)
             elif event.type == pygame.FINGERUP:
                 handle_release()
         if shutdown_hold_started and now - shutdown_hold_started >= 5.0:

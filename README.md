@@ -28,11 +28,18 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Low-frequency core-breach impact layered beneath the spoken kaboom
 - Full-screen pulsing red self-destruct numerals with persistent abort guidance
 - Illuminated countdown-screen ABORT control aligned exactly with its live touch target
+- **ACOUSTIC FIELD GAIN** touchscreen slider controlling the real PipeWire output from 0–100%
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
 
 The touchscreen is the primary interface. Physical arcade buttons are optional.
+
+The center-panel **ACOUSTIC FIELD GAIN** control shows `AFG 000` through
+`AFG 100`; at zero it reads `AURAL FIELD MUTED`. It controls PipeWire's current
+default audio sink with `wpctl`, caps gain at 100%, and relies on WirePlumber's
+enabled state restoration to retain the selected level across application and
+Raspberry Pi restarts.
 
 At idle, the pattern buffer remains stable and the analog needles drift only slightly, like live electrical instruments. Rapid pattern motion is reserved for an active transport sequence.
 
@@ -54,6 +61,9 @@ Install dependencies:
 sudo apt update
 sudo apt install python3-pygame python3-rpi.gpio
 ```
+
+The volume control also requires `wpctl`, supplied by the Raspberry Pi OS
+`wireplumber` package.
 
 Copy `startrek.py` and your audio files into one directory, then run:
 
