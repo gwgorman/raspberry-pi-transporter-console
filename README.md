@@ -98,6 +98,10 @@ speak_kaboom.wav
 
 Voice uses mixer channel 0 at full volume. The siren loops on channel 1 at 40% so the countdown stays intelligible. The console still runs when sounds are absent.
 
+The generated Sad Mac chime and core-breach impact play at unity application
+gain. Their synthesized sample levels retain digital headroom; system loudness
+is controlled by **ACOUSTIC FIELD GAIN**.
+
 For the included ten-second visual cycle, a transporter effect around 10.8 seconds works well: retain ten seconds at full level, then fade over the final 0.8 seconds. Longer replacement sounds are automatically faded by the application when the visual sequence ends.
 
 ## Options

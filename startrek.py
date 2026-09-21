@@ -116,9 +116,9 @@ if VOICE_CHANNEL:
 if SIREN_CHANNEL:
     SIREN_CHANNEL.set_volume(0.4)
 if CHIME_CHANNEL:
-    CHIME_CHANNEL.set_volume(0.48)
+    CHIME_CHANNEL.set_volume(1.0)
 if BOOM_CHANNEL:
-    BOOM_CHANNEL.set_volume(0.72)
+    BOOM_CHANNEL.set_volume(1.0)
 
 def make_sad_mac_chime():
     """Synthesize an original short two-tone retro computer error bonk."""
