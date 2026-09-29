@@ -76,7 +76,8 @@ messages or require cloud credentials.
 
 ![Apollo-style Ship Status dashboard at 1920×1080](assets/ship-status-screenshot.png)
 
-The Apollo-style header selector is present on both dashboards:
+The Apollo-style, panel-mounted rotary selector is present in the left
+instrument rail on both dashboards:
 
 - **TRANSPORTER** keeps the primary control console visible.
 - **SHIP STATUS** keeps the read-only telemetry console visible.

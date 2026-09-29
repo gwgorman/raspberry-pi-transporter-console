@@ -530,54 +530,83 @@ def layout(size):
     margin, gap = int(w * .018), int(w * .012)
     header_h, footer_h = int(h * .115), int(h * .205)
     body_y, body_h = margin + header_h + gap, h - (margin + header_h + gap) - footer_h - margin * 2
-    left_w, right_w = int(w * .28), int(w * .25)
-    center_w = w - margin * 2 - left_w - right_w - gap * 2
+    selector_w = max(108, int(w * .068))
+    content_x = margin + selector_w + gap
+    content_w = w - margin - content_x
+    left_w, right_w = int(content_w * .28), int(content_w * .25)
+    center_w = content_w - left_w - right_w - gap * 2
     result = {
         "header": pygame.Rect(margin, margin, w - margin * 2, header_h),
-        "left": pygame.Rect(margin, body_y, left_w, body_h),
-        "center": pygame.Rect(margin + left_w + gap, body_y, center_w, body_h),
+        "left": pygame.Rect(content_x, body_y, left_w, body_h),
+        "center": pygame.Rect(content_x + left_w + gap, body_y, center_w, body_h),
         "right": pygame.Rect(w - margin - right_w, body_y, right_w, body_h),
         "energize": pygame.Rect(margin, h - margin - footer_h, int(w * .64), footer_h),
         "destruct": pygame.Rect(margin + int(w * .64) + gap, h - margin - footer_h, w - margin * 2 - int(w * .64) - gap, footer_h),
+        "mode_selector": pygame.Rect(margin, body_y, selector_w, min(body_h, int(h * .37))),
     }
     result["maker_plate"] = pygame.Rect(result["right"].x + 62, result["right"].bottom - 31, result["right"].w - 124, 18)
     result["afg"] = pygame.Rect(result["center"].x + 62,
                                 result["center"].bottom - int(h * .115),
                                 result["center"].w - 124, int(h * .075))
-    result["mode_selector"] = pygame.Rect(result["header"].right - int(w * .34),
-                                           result["header"].y + int(h * .020),
-                                           int(w * .255), result["header"].h - int(h * .040))
     return result
 
 def draw_mode_selector(surface, rect):
-    """Apollo-style three-position display selector shared by both dashboards."""
-    pygame.draw.rect(surface, (80, 84, 79), rect, border_radius=5)
-    pygame.draw.rect(surface, (164, 166, 151), rect, 2, border_radius=5)
-    inner = rect.inflate(-8, -8)
-    pygame.draw.rect(surface, (8, 12, 12), inner, border_radius=3)
+    """Panel-mounted three-position rotary display selector."""
+    panel(surface, rect, (38, 42, 39), BEZEL, 5)
+    inner = rect.inflate(-10, -10)
+    pygame.draw.rect(surface, (10, 14, 13), inner, border_radius=3)
+    txt(surface, "DISPLAY", rect.w * .105, CREAM, (rect.centerx, rect.y + 18), "midtop", True)
+    txt(surface, "SELECTOR", rect.w * .085, MUTED, (rect.centerx, rect.y + 35), "midtop", True)
+
     options = ("TRANSPORTER", "SHIP STATUS", "AUTO")
-    segment_w = inner.w / len(options)
+    knob_center = (rect.centerx, rect.y + int(rect.h * .31))
+    radius = max(25, int(rect.w * .29))
+    pygame.draw.circle(surface, (155, 157, 145), knob_center, radius + 9)
+    pygame.draw.circle(surface, (28, 31, 29), knob_center, radius + 5)
+    pygame.draw.circle(surface, (76, 80, 74), knob_center, radius)
+    angles = (-140, -90, -40)
+    selected_index = options.index(display_mode)
+    for index, angle in enumerate(angles):
+        radians = math.radians(angle)
+        outer = (knob_center[0] + math.cos(radians) * (radius + 16),
+                 knob_center[1] + math.sin(radians) * (radius + 16))
+        inner_tick = (knob_center[0] + math.cos(radians) * (radius + 8),
+                      knob_center[1] + math.sin(radians) * (radius + 8))
+        pygame.draw.line(surface, CREAM, inner_tick, outer, 2)
+    pointer_angle = math.radians(angles[selected_index])
+    pointer = (knob_center[0] + math.cos(pointer_angle) * radius * .76,
+               knob_center[1] + math.sin(pointer_angle) * radius * .76)
+    pygame.draw.line(surface, AMBER, knob_center, pointer, 7)
+    pygame.draw.circle(surface, (24, 26, 24), knob_center, 10)
+    pygame.draw.circle(surface, (177, 178, 163), knob_center, 10, 2)
+
+    row_top = rect.y + int(rect.h * .51)
+    row_h = max(34, int((rect.bottom - row_top - 10) / 3))
     for index, option in enumerate(options):
-        segment = pygame.Rect(round(inner.x + index * segment_w), inner.y,
-                              round(segment_w), inner.h)
+        segment = pygame.Rect(rect.x + 8, row_top + index * row_h,
+                              rect.w - 16, row_h - 5)
         selected = display_mode == option
-        if selected:
-            color = GREEN if option == "AUTO" else AMBER
-            pygame.draw.rect(surface, tuple(channel // 5 for channel in color),
-                             segment.inflate(-4, -4), border_radius=3)
-            pygame.draw.rect(surface, color, segment.inflate(-4, -4), 3, border_radius=3)
-        if index:
-            pygame.draw.line(surface, BEZEL, (segment.x, inner.y + 3),
-                             (segment.x, inner.bottom - 3), 1)
-        txt(surface, option, rect.h * .19, color if selected else MUTED,
-            segment.center, "center", True)
+        color = GREEN if option == "AUTO" else AMBER
+        pygame.draw.rect(surface, (190, 188, 166) if selected else (91, 94, 87), segment, border_radius=2)
+        pygame.draw.rect(surface, color if selected else (145, 146, 134), segment, 2, border_radius=2)
+        lamp = (segment.x + 10, segment.centery)
+        pygame.draw.circle(surface, (41, 44, 41), lamp, 6)
+        pygame.draw.circle(surface, color if selected else (18, 22, 20), lamp, 4)
+        txt(surface, option, rect.w * .071,
+            (22, 24, 22) if selected else CREAM,
+            (segment.centerx + 5, segment.centery), "center", True)
 
 def mode_at_position(pos, size):
     rect = layout(size)["mode_selector"]
     if not rect.collidepoint(pos):
         return None
-    index = min(2, max(0, int((pos[0] - rect.x) * 3 / max(1, rect.w))))
-    return ("TRANSPORTER", "SHIP STATUS", "AUTO")[index]
+    options = ("TRANSPORTER", "SHIP STATUS", "AUTO")
+    row_top = rect.y + int(rect.h * .51)
+    if pos[1] < row_top:
+        return options[(options.index(display_mode) + 1) % len(options)]
+    row_h = max(34, int((rect.bottom - row_top - 10) / 3))
+    index = min(2, max(0, int((pos[1] - row_top) / row_h)))
+    return options[index]
 
 def shutdown_layout(size):
     w, h = size
@@ -849,8 +878,10 @@ def draw_ship_status(surface, now, data):
     margin, gap = int(w * .018), int(w * .012)
     body_y = r["header"].bottom + gap
     body_h = h - body_y - margin
-    left_w, center_w = int(w * .29), int(w * .36)
-    left = pygame.Rect(margin, body_y, left_w, body_h)
+    content_x = r["mode_selector"].right + gap
+    content_w = w - margin - content_x
+    left_w, center_w = int(content_w * .29), int(content_w * .36)
+    left = pygame.Rect(content_x, body_y, left_w, body_h)
     center = pygame.Rect(left.right + gap, body_y, center_w, body_h)
     right = pygame.Rect(center.right + gap, body_y, w - margin - center.right - gap, body_h)
 
