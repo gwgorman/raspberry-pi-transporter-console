@@ -12,6 +12,11 @@ import time
 import pygame
 
 try:
+    from office_telemetry import TelemetryService
+except ImportError:
+    TelemetryService = None
+
+try:
     import RPi.GPIO as GPIO
 except ImportError:
     GPIO = None
@@ -19,13 +24,20 @@ except ImportError:
 MODE = "both"
 TEST_MODE = "--test" in sys.argv
 WINDOWED = "--windowed" in sys.argv
+OFFICE_IDLE_SECONDS = 120.0
 for arg in sys.argv:
     if arg.startswith("--mode="):
         MODE = arg.split("=", 1)[1].lower()
+    elif arg.startswith("--office-timeout="):
+        try:
+            OFFICE_IDLE_SECONDS = max(5.0, float(arg.split("=", 1)[1]))
+        except ValueError:
+            raise SystemExit("--office-timeout must be a number of seconds")
 if MODE not in ("transporter", "selfdestruct", "both"):
     raise SystemExit("Use --mode=transporter, --mode=selfdestruct, or --mode=both")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".config", "startrek-console.json")
 GREEN_PIN, RED_PIN = 17, 27
 TRANSPORT_DURATION = 10.0
 running = True
@@ -41,6 +53,19 @@ afg_dragging = False
 afg_value = 72
 afg_pending = None
 afg_event = threading.Event()
+last_activity = time.monotonic()
+
+def load_display_mode():
+    try:
+        import json
+        with open(CONFIG_PATH, encoding="utf-8") as config_file:
+            mode = json.load(config_file).get("display_mode", "AUTO")
+            return mode if mode in ("TRANSPORTER", "SHIP STATUS", "AUTO") else "AUTO"
+    except (OSError, ValueError, TypeError):
+        return "AUTO"
+
+display_mode = load_display_mode()
+telemetry = TelemetryService() if TelemetryService else None
 
 BLACK, NAVY = (4, 7, 12), (8, 18, 30)
 PANEL, PANEL_2 = (14, 31, 45), (18, 42, 58)
@@ -106,6 +131,37 @@ def set_system_volume(value):
     with state_lock:
         afg_value = afg_pending = value
     afg_event.set()
+
+def mark_activity():
+    global last_activity
+    last_activity = time.monotonic()
+
+def save_display_mode():
+    try:
+        import json
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        temporary = CONFIG_PATH + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as config_file:
+            json.dump({"display_mode": display_mode}, config_file)
+        os.replace(temporary, CONFIG_PATH)
+    except OSError as exc:
+        print(f"Display mode was not persisted: {exc}")
+
+def select_display_mode(mode):
+    global display_mode
+    if mode not in ("TRANSPORTER", "SHIP STATUS", "AUTO"):
+        return
+    display_mode = mode
+    mark_activity()
+    save_display_mode()
+
+def ship_status_active(now):
+    if (any_sequence_active or ui_state != "READY" or shutdown_confirm_until > now or
+            shutdown_pending or countdown_value is not None):
+        return False
+    if display_mode == "SHIP STATUS":
+        return True
+    return display_mode == "AUTO" and now - last_activity >= OFFICE_IDLE_SECONDS
 
 VOICE_CHANNEL = pygame.mixer.Channel(0) if pygame.mixer.get_init() else None
 SIREN_CHANNEL = pygame.mixer.Channel(1) if pygame.mixer.get_init() else None
@@ -294,10 +350,12 @@ def self_destruct_task():
     set_ui("READY", "PATTERN BUFFER STANDING BY", progress=0)
 
 def trigger_transporter():
+    mark_activity()
     threading.Thread(target=play_transporter_task, daemon=True).start()
 
 def trigger_self_destruct():
     global abort_count, abort_triggered
+    mark_activity()
     with state_lock:
         if self_destruct_active:
             abort_count += 1
@@ -472,21 +530,83 @@ def layout(size):
     margin, gap = int(w * .018), int(w * .012)
     header_h, footer_h = int(h * .115), int(h * .205)
     body_y, body_h = margin + header_h + gap, h - (margin + header_h + gap) - footer_h - margin * 2
-    left_w, right_w = int(w * .28), int(w * .25)
-    center_w = w - margin * 2 - left_w - right_w - gap * 2
+    selector_w = max(108, int(w * .068))
+    content_x = margin + selector_w + gap
+    content_w = w - margin - content_x
+    left_w, right_w = int(content_w * .28), int(content_w * .25)
+    center_w = content_w - left_w - right_w - gap * 2
     result = {
         "header": pygame.Rect(margin, margin, w - margin * 2, header_h),
-        "left": pygame.Rect(margin, body_y, left_w, body_h),
-        "center": pygame.Rect(margin + left_w + gap, body_y, center_w, body_h),
+        "left": pygame.Rect(content_x, body_y, left_w, body_h),
+        "center": pygame.Rect(content_x + left_w + gap, body_y, center_w, body_h),
         "right": pygame.Rect(w - margin - right_w, body_y, right_w, body_h),
         "energize": pygame.Rect(margin, h - margin - footer_h, int(w * .64), footer_h),
         "destruct": pygame.Rect(margin + int(w * .64) + gap, h - margin - footer_h, w - margin * 2 - int(w * .64) - gap, footer_h),
+        "mode_selector": pygame.Rect(margin, body_y, selector_w, min(body_h, int(h * .37))),
     }
     result["maker_plate"] = pygame.Rect(result["right"].x + 62, result["right"].bottom - 31, result["right"].w - 124, 18)
     result["afg"] = pygame.Rect(result["center"].x + 62,
                                 result["center"].bottom - int(h * .115),
                                 result["center"].w - 124, int(h * .075))
     return result
+
+def draw_mode_selector(surface, rect):
+    """Panel-mounted three-position rotary display selector."""
+    panel(surface, rect, (38, 42, 39), BEZEL, 5)
+    inner = rect.inflate(-10, -10)
+    pygame.draw.rect(surface, (10, 14, 13), inner, border_radius=3)
+    txt(surface, "DISPLAY", rect.w * .105, CREAM, (rect.centerx, rect.y + 18), "midtop", True)
+    txt(surface, "SELECTOR", rect.w * .085, MUTED, (rect.centerx, rect.y + 35), "midtop", True)
+
+    options = ("TRANSPORTER", "SHIP STATUS", "AUTO")
+    knob_center = (rect.centerx, rect.y + int(rect.h * .31))
+    radius = max(25, int(rect.w * .29))
+    pygame.draw.circle(surface, (155, 157, 145), knob_center, radius + 9)
+    pygame.draw.circle(surface, (28, 31, 29), knob_center, radius + 5)
+    pygame.draw.circle(surface, (76, 80, 74), knob_center, radius)
+    angles = (-140, -90, -40)
+    selected_index = options.index(display_mode)
+    for index, angle in enumerate(angles):
+        radians = math.radians(angle)
+        outer = (knob_center[0] + math.cos(radians) * (radius + 16),
+                 knob_center[1] + math.sin(radians) * (radius + 16))
+        inner_tick = (knob_center[0] + math.cos(radians) * (radius + 8),
+                      knob_center[1] + math.sin(radians) * (radius + 8))
+        pygame.draw.line(surface, CREAM, inner_tick, outer, 2)
+    pointer_angle = math.radians(angles[selected_index])
+    pointer = (knob_center[0] + math.cos(pointer_angle) * radius * .76,
+               knob_center[1] + math.sin(pointer_angle) * radius * .76)
+    pygame.draw.line(surface, AMBER, knob_center, pointer, 7)
+    pygame.draw.circle(surface, (24, 26, 24), knob_center, 10)
+    pygame.draw.circle(surface, (177, 178, 163), knob_center, 10, 2)
+
+    row_top = rect.y + int(rect.h * .51)
+    row_h = max(34, int((rect.bottom - row_top - 10) / 3))
+    for index, option in enumerate(options):
+        segment = pygame.Rect(rect.x + 8, row_top + index * row_h,
+                              rect.w - 16, row_h - 5)
+        selected = display_mode == option
+        color = GREEN if option == "AUTO" else AMBER
+        pygame.draw.rect(surface, (190, 188, 166) if selected else (91, 94, 87), segment, border_radius=2)
+        pygame.draw.rect(surface, color if selected else (145, 146, 134), segment, 2, border_radius=2)
+        lamp = (segment.x + 10, segment.centery)
+        pygame.draw.circle(surface, (41, 44, 41), lamp, 6)
+        pygame.draw.circle(surface, color if selected else (18, 22, 20), lamp, 4)
+        txt(surface, option, rect.w * .071,
+            (22, 24, 22) if selected else CREAM,
+            (segment.centerx + 5, segment.centery), "center", True)
+
+def mode_at_position(pos, size):
+    rect = layout(size)["mode_selector"]
+    if not rect.collidepoint(pos):
+        return None
+    options = ("TRANSPORTER", "SHIP STATUS", "AUTO")
+    row_top = rect.y + int(rect.h * .51)
+    if pos[1] < row_top:
+        return options[(options.index(display_mode) + 1) % len(options)]
+    row_h = max(34, int((rect.bottom - row_top - 10) / 3))
+    index = min(2, max(0, int((pos[1] - row_top) / row_h)))
+    return options[index]
 
 def shutdown_layout(size):
     w, h = size
@@ -533,6 +653,7 @@ def draw_console(surface, now):
     lamp = GREEN if ui_state in ("READY", "COMPLETE") else RED if ui_state in ("DESTRUCT", "DESTROYED") else AMBER
     pygame.draw.circle(surface, lamp, (r["header"].right - 38, r["header"].centery), 14)
     txt(surface, ui_state, h * .03, lamp, (r["header"].right - 66, r["header"].centery), "midright", True)
+    draw_mode_selector(surface, r["mode_selector"])
 
     panel(surface, r["left"])
     # Idle instruments make broad, slow mechanical sweeps; operating indications
@@ -700,6 +821,177 @@ def draw_console(surface, now):
     if TEST_MODE:
         txt(surface, "TEST  G: ENERGIZE   R: DESTRUCT/ABORT   Q/ESC: QUIT", h * .016, MUTED, (w // 2, h - 3), "midbottom")
 
+def format_uptime(seconds):
+    seconds = max(0, int(seconds or 0))
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes = remainder // 60
+    return f"{days:03d}D {hours:02d}:{minutes:02d}"
+
+def format_rate(value):
+    value = max(0.0, float(value or 0))
+    if value >= 1024 * 1024:
+        return f"{value / (1024 * 1024):4.1f} MB/S"
+    if value >= 1024:
+        return f"{value / 1024:4.1f} KB/S"
+    return f"{value:4.0f} B/S"
+
+def data_age(timestamp):
+    if not timestamp:
+        return "NO DATA", RED
+    age = max(0, time.time() - timestamp)
+    if age < 90:
+        return f"LIVE {int(age):02d}S", GREEN
+    if age < 3600:
+        return f"STALE {int(age // 60):02d}M", AMBER
+    return f"STALE {int(age // 3600):02d}H", RED
+
+def telemetry_card(surface, rect, label, value, detail="", color=GREEN, state=True):
+    pygame.draw.rect(surface, (73, 78, 73), rect, border_radius=4)
+    pygame.draw.rect(surface, (158, 159, 145), rect, 2, border_radius=4)
+    inner = rect.inflate(-8, -8)
+    pygame.draw.rect(surface, (5, 12, 13), inner, border_radius=2)
+    lamp_center = (inner.x + 17, inner.centery)
+    pygame.draw.circle(surface, BEZEL, lamp_center, 10)
+    pygame.draw.circle(surface, color if state else (25, 28, 25), lamp_center, 6)
+    txt(surface, label, rect.h * .18, CREAM, (inner.x + 36, inner.y + 5), bold=True)
+    txt(surface, value, rect.h * .28, WHITE, (inner.x + 36, inner.centery + 4), "midleft", True)
+    if detail:
+        txt(surface, detail, rect.h * .14, color, (inner.right - 7, inner.bottom - 5), "bottomright", True)
+
+def draw_ship_status(surface, now, data):
+    """Apollo/steampunk telemetry panel; all data is read-only."""
+    r, w, h = layout(surface.get_size()), *surface.get_size()
+    surface.fill(BLACK)
+    panel(surface, r["header"], NAVY, CYAN)
+    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
+        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    txt(surface, "SHIP SYSTEMS STATUS", h * .047, WHITE,
+        (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
+    draw_mode_selector(surface, r["mode_selector"])
+    fresh = time.time() - data.get("updated", 0) < 4
+    status_color = GREEN if fresh else AMBER
+    pygame.draw.circle(surface, status_color, (r["header"].right - 38, r["header"].centery), 14)
+    txt(surface, "NOMINAL" if fresh else "DEGRADED", h * .026, status_color,
+        (r["header"].right - 66, r["header"].centery), "midright", True)
+
+    margin, gap = int(w * .018), int(w * .012)
+    body_y = r["header"].bottom + gap
+    body_h = h - body_y - margin
+    content_x = r["mode_selector"].right + gap
+    content_w = w - margin - content_x
+    left_w, center_w = int(content_w * .29), int(content_w * .36)
+    left = pygame.Rect(content_x, body_y, left_w, body_h)
+    center = pygame.Rect(left.right + gap, body_y, center_w, body_h)
+    right = pygame.Rect(center.right + gap, body_y, w - margin - center.right - gap, body_h)
+
+    system = data.get("system", {})
+    panel(surface, left, PANEL, BLUE, 12)
+    txt(surface, "COMPUTATION CORE", h * .025, CREAM, (left.x + 18, left.y + 14), bold=True)
+    gauge_y = left.y + int(left.h * .27)
+    radius = int(min(left.w * .19, left.h * .17))
+    gauge(surface, (left.x + int(left.w * .28), gauge_y), radius,
+          min(1, system.get("cpu", 0) / 100), "CORE LOAD", GREEN)
+    gauge(surface, (left.x + int(left.w * .72), gauge_y), radius,
+          min(1, system.get("memory", 0) / 100), "LOGIC STORAGE", CYAN)
+    card_h = int(h * .080)
+    temperature_c = system.get("temperature_c")
+    temperature_f = temperature_c * 9 / 5 + 32 if temperature_c is not None else None
+    telemetry_card(surface, pygame.Rect(left.x + 18, left.y + int(left.h * .50), left.w - 36, card_h),
+                   "CORE THERMAL", (f"{temperature_f:05.1f} °F / {temperature_c:04.1f} °C"
+                                    if temperature_f is not None else "N/A"),
+                   "NORMAL" if temperature_c is not None and temperature_c < 75 else "CAUTION",
+                   GREEN if temperature_c is not None and temperature_c < 75 else AMBER,
+                   temperature_c is not None)
+    telemetry_card(surface, pygame.Rect(left.x + 18, left.y + int(left.h * .62), left.w - 36, card_h),
+                   "MISSION ELAPSED TIME", format_uptime(system.get("uptime")), "PI UPTIME", AMBER)
+    sys_age, sys_age_color = data_age(data.get("updated"))
+    telemetry_card(surface, pygame.Rect(left.x + 18, left.y + int(left.h * .74), left.w - 36, card_h),
+                   "TELEMETRY CLOCK", time.strftime("%H:%M:%S"), sys_age, sys_age_color, fresh)
+
+    panel(surface, center, PANEL, BLUE, 12)
+    txt(surface, "EXTERNAL ENVIRONMENT", h * .025, CREAM, (center.x + 18, center.y + 14), bold=True)
+    weather = data.get("weather", {})
+    forecast = data.get("forecast", {})
+    local_weather = bool(weather.get("temperature_c") is not None)
+    air_f = (weather.get("temperature_c") * 9 / 5 + 32) if local_weather else forecast.get("temperature_f")
+    weather_age = data.get("weatherflow", {}).get("updated") if local_weather else forecast.get("updated")
+    weather_source = "WEATHERFLOW UDP" if local_weather else "MQTT FORECAST"
+    weather_color = GREEN if weather_age and time.time() - weather_age < 180 else AMBER
+    big_radius = int(min(center.w * .19, center.h * .18))
+    gauge(surface, (center.x + int(center.w * .28), center.y + int(center.h * .28)), big_radius,
+          max(0, min(1, (float(air_f or 0) + 10) / 130)), "AIR TEMPERATURE", AMBER)
+    wind_mph = float(weather.get("wind_mps") or 0) * 2.23694
+    gauge(surface, (center.x + int(center.w * .72), center.y + int(center.h * .28)), big_radius,
+          min(1, wind_mph / 50), "WIND VELOCITY", CYAN)
+    txt(surface, f"{air_f:05.1f} °F" if air_f is not None else "NO DATA", h * .025, WHITE,
+        (center.x + int(center.w * .28), center.y + int(center.h * .47)), "center", True)
+    direction = weather.get("wind_direction")
+    txt(surface, f"{wind_mph:04.1f} MPH  {int(direction):03d}°" if direction is not None else "WIND LINK WAITING",
+        h * .021, WHITE, (center.x + int(center.w * .72), center.y + int(center.h * .47)), "center", True)
+    meter_y = center.y + int(center.h * .55)
+    meter_h = int(h * .065)
+    pressure = float(weather.get("pressure_mb") or 0)
+    humidity = float(weather.get("humidity") or 0)
+    rain = float(weather.get("daily_rain_mm") or weather.get("rain_mm") or 0) / 25.4
+    edge_meter(surface, pygame.Rect(center.x + 20, meter_y, center.w - 40, meter_h),
+               max(0, min(1, (pressure - 970) / 80)) if pressure else 0, "BAROMETRIC PRESSURE", AMBER)
+    edge_meter(surface, pygame.Rect(center.x + 20, meter_y + meter_h + 10, center.w - 40, meter_h),
+               humidity / 100, "ATMOSPHERIC HUMIDITY", CYAN)
+    detail_y = meter_y + (meter_h + 10) * 2 + 10
+    age_text, _ = data_age(weather_age)
+    telemetry_card(surface, pygame.Rect(center.x + 20, detail_y, center.w - 40, card_h),
+                   weather_source, forecast.get("summary", "LOCAL OBSERVATION") if not local_weather else f"RAIN {rain:.2f} IN",
+                   age_text, weather_color, bool(weather_age))
+
+    panel(surface, right, PANEL, BLUE, 12)
+    txt(surface, "COMMUNICATIONS", h * .025, CREAM, (right.x + 18, right.y + 14), bold=True)
+    network = data.get("network", {})
+    network_y = right.y + 54
+    network_h = int(h * .105)
+    for index, (name, label) in enumerate((("wlan0", "WIRELESS TELEMETRY"), ("eth0", "HARDLINE TELEMETRY"))):
+        info = network.get(name, {})
+        card = pygame.Rect(right.x + 16, network_y + index * (network_h + 10), right.w - 32, network_h)
+        state = bool(info.get("up"))
+        detail = f"RX {format_rate(info.get('rx_rate'))}  TX {format_rate(info.get('tx_rate'))}"
+        value = f"{info.get('ipv4', '—')}" if state else "LINK DOWN"
+        telemetry_card(surface, card, label, value, detail, GREEN if state else RED, state)
+    aux_y = network_y + 2 * (network_h + 10) + 12
+    txt(surface, "AUXILIARY SENSOR BUS", h * .020, AMBER, (right.x + 18, aux_y), bold=True)
+    aux_y += 34
+    house = data.get("house", {})
+    mqtt_info = data.get("mqtt", {})
+    small_h = int(h * .068)
+    wine = house.get("wine_cellar", {})
+    keg = house.get("keg", {})
+    telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
+                   "WINE CELLAR CLIMATE", f"{wine.get('temperature_f', '—')} °F  {wine.get('humidity', '—')}%",
+                   data_age(wine.get("updated"))[0], CYAN, bool(wine.get("updated")))
+    aux_y += small_h + 7
+    telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
+                   "KEG THERMAL", f"{keg.get('temperature_f', '—')} °F  {keg.get('humidity', '—')}%",
+                   data_age(keg.get("updated"))[0], AMBER, bool(keg.get("updated")))
+    aux_y += small_h + 7
+    left_door = house.get("garage_left", {}).get("state", "—")
+    right_door = house.get("garage_right", {}).get("state", "—")
+    doors_safe = left_door == right_door == "closed"
+    telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
+                   "SHUTTLE BAY DOORS", f"L {str(left_door).upper()}   R {str(right_door).upper()}",
+                   "SECURED" if doors_safe else "CHECK BAY", GREEN if doors_safe else AMBER, doors_safe)
+    aux_y += small_h + 7
+    leaks = house.get("leaks", {})
+    current_items = [item for item in leaks.values()
+                     if item.get("updated") and time.time() - item["updated"] < 86400]
+    wet = sum(1 for item in current_items if item.get("state") == "wet")
+    current = len(current_items)
+    leak_safe = wet == 0
+    telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
+                   "WATER RECLAMATION", "DRY" if leak_safe else f"{wet} LEAK ALERT",
+                   f"{current}/{len(leaks)} CURRENT", GREEN if leak_safe else RED, leak_safe)
+    mqtt_age, mqtt_color = data_age(mqtt_info.get("updated"))
+    txt(surface, f"SENSOR BUS {'ONLINE' if mqtt_info.get('connected') else 'OFFLINE'}  •  {mqtt_age}",
+        h * .014, mqtt_color, (right.centerx, right.bottom - 13), "midbottom", True)
+
 def draw_sad_mac(surface):
     """Full-screen monochrome homage to the original compact-Mac crash icon."""
     w, h = surface.get_size()
@@ -819,6 +1111,16 @@ def handle_touch(pos, now):
             shutdown_confirm_until = 0
         return
     r = layout(screen.get_size())
+    selected_mode = mode_at_position(pos, screen.get_size())
+    if selected_mode:
+        select_display_mode(selected_mode)
+        return
+    if ship_status_active(now):
+        # AUTO wake taps are deliberately consumed so the hidden console control
+        # underneath cannot fire. Forced SHIP STATUS remains until its selector moves.
+        mark_activity()
+        return
+    mark_activity()
     if r["afg"].collidepoint(pos) and countdown_value is None:
         track = r["afg"].inflate(-28, -10)
         set_system_volume((pos[0] - track.x) * 100 / max(1, track.w))
@@ -837,6 +1139,9 @@ def handle_touch(pos, now):
 def handle_press(pos, now):
     global shutdown_hold_started, afg_dragging
     r = layout(screen.get_size())
+    if mode_at_position(pos, screen.get_size()) or ship_status_active(now):
+        handle_touch(pos, now)
+        return
     if (r["afg"].collidepoint(pos) and countdown_value is None and
             shutdown_confirm_until <= now):
         afg_dragging = True
@@ -865,6 +1170,8 @@ elif not TEST_MODE:
     print("RPi.GPIO unavailable; touchscreen controls remain active")
 
 threading.Thread(target=system_volume_worker, daemon=True).start()
+if telemetry:
+    telemetry.start()
 
 print(f"MODE: {MODE.upper()} | TEST: {TEST_MODE} | DISPLAY: {screen.get_size()}")
 try:
@@ -874,6 +1181,7 @@ try:
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
+                mark_activity()
                 if event.key == pygame.K_g:
                     trigger_transporter()
                 elif event.key == pygame.K_r:
@@ -903,6 +1211,8 @@ try:
             draw_mushroom_cloud(screen, now)
         elif ui_state == "SAD_MAC":
             draw_sad_mac(screen)
+        elif ship_status_active(now):
+            draw_ship_status(screen, now, telemetry.snapshot() if telemetry else {})
         else:
             draw_console(screen, now)
             if countdown_value is not None:
@@ -913,6 +1223,9 @@ try:
         clock.tick(60)
 finally:
     running = False
+    afg_event.set()
+    if telemetry:
+        telemetry.stop()
     stop_siren()
     if pygame.mixer.get_init():
         pygame.mixer.stop()
