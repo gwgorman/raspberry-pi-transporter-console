@@ -29,6 +29,8 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Full-screen pulsing red self-destruct numerals with persistent abort guidance
 - Illuminated countdown-screen ABORT control aligned exactly with its live touch target
 - **ACOUSTIC FIELD GAIN** touchscreen slider controlling the real PipeWire output from 0–100%
+- Persistent **TRANSPORTER / SHIP STATUS / AUTO** three-position selector
+- Apollo-style Ship Status dashboard with Pi, network, WeatherFlow UDP, and curated MQTT telemetry
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
@@ -59,11 +61,33 @@ Install dependencies:
 
 ```bash
 sudo apt update
-sudo apt install python3-pygame python3-rpi.gpio
+sudo apt install python3-pygame python3-rpi.gpio python3-psutil python3-paho-mqtt
 ```
 
 The volume control also requires `wpctl`, supplied by the Raspberry Pi OS
 `wireplumber` package.
+
+Install `office_telemetry.py` beside `startrek.py`. Ship Status reads only local
+data: Pi health, `wlan0` and `eth0`, WeatherFlow UDP broadcasts on port 50222,
+and selected MQTT topics from `snoop433.local:1883`. It does not publish MQTT
+messages or require cloud credentials.
+
+## Ship Status selector
+
+![Apollo-style Ship Status dashboard at 1920×1080](assets/ship-status-screenshot.png)
+
+The Apollo-style header selector is present on both dashboards:
+
+- **TRANSPORTER** keeps the primary control console visible.
+- **SHIP STATUS** keeps the read-only telemetry console visible.
+- **AUTO** returns to the transporter on activity and enters Ship Status after
+  two READY-state idle minutes.
+
+The selected position is stored in `~/.config/startrek-console.json` and
+survives application and Raspberry Pi restarts. In AUTO, the first touchscreen
+tap on Ship Status wakes the transporter and is consumed; a second tap is
+required to activate a control. GPIO buttons remain immediate and active
+sequences always override Ship Status.
 
 Copy `startrek.py` and your audio files into one directory, then run:
 
@@ -82,6 +106,10 @@ For the full Raspberry Pi kiosk with GPIO enabled:
 ```bash
 python3 startrek.py --mode=both
 ```
+
+For a short AUTO commissioning test, `--office-timeout=5` temporarily reduces
+the idle delay without changing the saved selector position. The production
+default remains 120 seconds.
 
 ## Audio files
 
