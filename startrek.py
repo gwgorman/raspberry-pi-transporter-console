@@ -17,6 +17,11 @@ except ImportError:
     TelemetryService = None
 
 try:
+    from yolink_telemetry import YoLinkService
+except ImportError:
+    YoLinkService = None
+
+try:
     import RPi.GPIO as GPIO
 except ImportError:
     GPIO = None
@@ -55,17 +60,22 @@ afg_pending = None
 afg_event = threading.Event()
 last_activity = time.monotonic()
 
-def load_display_mode():
+def load_console_preferences():
     try:
         import json
         with open(CONFIG_PATH, encoding="utf-8") as config_file:
-            mode = json.load(config_file).get("display_mode", "AUTO")
-            return mode if mode in ("TRANSPORTER", "SHIP STATUS", "AUTO") else "AUTO"
+            config = json.load(config_file)
+            mode = config.get("display_mode", "AUTO")
+            page = config.get("status_page", "NETWORK")
+            return (mode if mode in ("TRANSPORTER", "SHIP STATUS", "AUTO") else "AUTO",
+                    page if page in ("NETWORK", "ENVIRONMENT") else "NETWORK")
     except (OSError, ValueError, TypeError):
-        return "AUTO"
+        return "AUTO", "NETWORK"
 
-display_mode = load_display_mode()
+display_mode, status_page = load_console_preferences()
 telemetry = TelemetryService() if TelemetryService else None
+yolink = YoLinkService() if YoLinkService else None
+environment_sensor_page = 0
 
 BLACK, NAVY = (4, 7, 12), (8, 18, 30)
 PANEL, PANEL_2 = (14, 31, 45), (18, 42, 58)
@@ -142,7 +152,7 @@ def save_display_mode():
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
         temporary = CONFIG_PATH + ".tmp"
         with open(temporary, "w", encoding="utf-8") as config_file:
-            json.dump({"display_mode": display_mode}, config_file)
+            json.dump({"display_mode": display_mode, "status_page": status_page}, config_file)
         os.replace(temporary, CONFIG_PATH)
     except OSError as exc:
         print(f"Display mode was not persisted: {exc}")
@@ -608,6 +618,48 @@ def mode_at_position(pos, size):
     index = min(2, max(0, int((pos[1] - row_top) / row_h)))
     return options[index]
 
+def status_nav_layout(size):
+    r = layout(size)
+    gap = int(size[0] * .012)
+    footer = pygame.Rect(r["mode_selector"].right + gap, size[1] - int(size[1] * .075),
+                         size[0] - r["mode_selector"].right - gap - int(size[0] * .018),
+                         int(size[1] * .052))
+    half = (footer.w - gap) // 2
+    return {
+        "NETWORK": pygame.Rect(footer.x, footer.y, half, footer.h),
+        "ENVIRONMENT": pygame.Rect(footer.x + half + gap, footer.y, footer.w - half - gap, footer.h),
+    }
+
+def status_page_at_position(pos, size):
+    for page, rect in status_nav_layout(size).items():
+        if rect.collidepoint(pos):
+            return page
+    return None
+
+def draw_status_nav(surface):
+    for page, rect in status_nav_layout(surface.get_size()).items():
+        selected = status_page == page
+        color = CYAN if page == "NETWORK" else AMBER
+        pygame.draw.rect(surface, tuple(channel // (4 if selected else 8) for channel in color),
+                         rect, border_radius=5)
+        pygame.draw.rect(surface, color if selected else BEZEL, rect, 3, border_radius=5)
+        txt(surface, page, rect.h * .30, WHITE if selected else MUTED,
+            rect.center, "center", True)
+
+def environment_pager_layout(size):
+    r = layout(size)
+    w, h = size
+    gap, margin = int(w * .012), int(w * .018)
+    content_x = r["mode_selector"].right + gap
+    content_w = w - margin - content_x
+    grid_w = content_w - int(content_w * .29) - gap
+    y = status_nav_layout(size)["NETWORK"].y - int(h * .047)
+    return {
+        "PREVIOUS": pygame.Rect(content_x + 18, y, int(w * .085), int(h * .035)),
+        "NEXT": pygame.Rect(content_x + grid_w - 18 - int(w * .085), y,
+                            int(w * .085), int(h * .035)),
+    }
+
 def shutdown_layout(size):
     w, h = size
     return {
@@ -877,7 +929,7 @@ def draw_ship_status(surface, now, data):
 
     margin, gap = int(w * .018), int(w * .012)
     body_y = r["header"].bottom + gap
-    body_h = h - body_y - margin
+    body_h = status_nav_layout(surface.get_size())["NETWORK"].y - body_y - gap
     content_x = r["mode_selector"].right + gap
     content_w = w - margin - content_x
     left_w, center_w = int(content_w * .29), int(content_w * .36)
@@ -991,6 +1043,131 @@ def draw_ship_status(surface, now, data):
     mqtt_age, mqtt_color = data_age(mqtt_info.get("updated"))
     txt(surface, f"SENSOR BUS {'ONLINE' if mqtt_info.get('connected') else 'OFFLINE'}  •  {mqtt_age}",
         h * .014, mqtt_color, (right.centerx, right.bottom - 13), "midbottom", True)
+    draw_status_nav(surface)
+
+def compact_age(timestamp):
+    if not timestamp:
+        return "NO REPORT"
+    age = max(0, time.time() - timestamp)
+    if age < 60:
+        return f"{int(age)} SEC AGO"
+    if age < 3600:
+        return f"{int(age // 60)} MIN AGO"
+    if age < 86400:
+        return f"{int(age // 3600)} HR AGO"
+    return f"{int(age // 86400)} DAY AGO"
+
+def draw_environment_status(surface, now, data):
+    """YoLink environmental page; renders truthfully even before configuration."""
+    r, w, h = layout(surface.get_size()), *surface.get_size()
+    surface.fill(BLACK)
+    panel(surface, r["header"], NAVY, CYAN)
+    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
+        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    txt(surface, "ENVIRONMENTAL CONTROL", h * .047, WHITE,
+        (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
+    draw_mode_selector(surface, r["mode_selector"])
+    source = data.get("source", {})
+    source_state = source.get("state", "NOT CONFIGURED")
+    state_color = GREEN if source_state == "CONNECTED" else AMBER if source_state in ("RECONNECTING", "NOT CONFIGURED") else RED
+    pygame.draw.circle(surface, state_color, (r["header"].right - 38, r["header"].centery), 14)
+    txt(surface, source_state, h * .026, state_color,
+        (r["header"].right - 66, r["header"].centery), "midright", True)
+
+    gap = int(w * .012)
+    body_y = r["header"].bottom + gap
+    nav_y = status_nav_layout(surface.get_size())["NETWORK"].y
+    body_h = nav_y - body_y - gap
+    content_x = r["mode_selector"].right + gap
+    content_w = w - int(w * .018) - content_x
+    temps = list(data.get("temperature_sensors", []))
+    door = data.get("shed", {})
+
+    door_w = int(content_w * .29)
+    grid = pygame.Rect(content_x, body_y, content_w - door_w - gap, body_h)
+    door_panel = pygame.Rect(grid.right + gap, body_y, door_w, body_h)
+    panel(surface, grid, PANEL, BLUE, 10)
+    txt(surface, "HABITATION CLIMATE", h * .025, CREAM, (grid.x + 18, grid.y + 14), bold=True)
+
+    if not temps:
+        message = "YOLINK CREDENTIALS REQUIRED" if source_state == "NOT CONFIGURED" else "NO SUPPORTED TEMPERATURE SENSORS"
+        txt(surface, message, h * .031, AMBER, grid.center, "center", True)
+        txt(surface, "CONFIGURE PRIVATELY ON THE RASPBERRY PI", h * .017, MUTED,
+            (grid.centerx, grid.centery + 44), "center", True)
+    else:
+        page_size = 6
+        page_count = max(1, math.ceil(len(temps) / page_size))
+        active_page = min(environment_sensor_page, page_count - 1)
+        shown = temps[active_page * page_size:(active_page + 1) * page_size]
+        card_gap = 12
+        columns, rows = 2, 3
+        top = grid.y + 58
+        card_w = (grid.w - 36 - card_gap) // columns
+        card_h = (grid.bottom - top - 18 - card_gap * (rows - 1)) // rows
+        for index, sensor in enumerate(shown):
+            col, row = index % columns, index // columns
+            card = pygame.Rect(grid.x + 18 + col * (card_w + card_gap),
+                               top + row * (card_h + card_gap), card_w, card_h)
+            online = sensor.get("online") is True
+            warning = sensor.get("alarm") or not online
+            color = RED if sensor.get("error") else AMBER if warning else GREEN
+            panel(surface, card, (8, 16, 17), BEZEL, 5)
+            txt(surface, str(sensor.get("name", "UNNAMED"))[:28].upper(), card.h * .13, CREAM,
+                (card.x + 13, card.y + 10), bold=True)
+            temperature = sensor.get("temperature_f")
+            txt(surface, f"{temperature:05.1f} °F" if temperature is not None else "— °F",
+                card.h * .27, WHITE, (card.x + 13, card.centery - 3), "midleft", True)
+            humidity = sensor.get("humidity")
+            txt(surface, f"HUM {humidity:.0f}%" if humidity is not None else "HUM —",
+                card.h * .12, CYAN, (card.x + 15, card.bottom - 17), "bottomleft", True)
+            battery = sensor.get("battery")
+            txt(surface, f"BAT {battery}/4" if battery is not None else "BAT —/4",
+                card.h * .11, color, (card.right - 13, card.bottom - 18), "bottomright", True)
+            txt(surface, compact_age(sensor.get("reported_at")), card.h * .09, MUTED,
+                (card.right - 13, card.y + 12), "topright", True)
+            pygame.draw.circle(surface, BEZEL, (card.right - 18, card.centery), 9)
+            pygame.draw.circle(surface, color, (card.right - 18, card.centery), 5)
+        if page_count > 1:
+            pager = environment_pager_layout(surface.get_size())
+            for name, rect in pager.items():
+                enabled = (name == "PREVIOUS" and active_page > 0) or (name == "NEXT" and active_page + 1 < page_count)
+                pygame.draw.rect(surface, (45, 48, 44), rect, border_radius=3)
+                pygame.draw.rect(surface, AMBER if enabled else BEZEL, rect, 2, border_radius=3)
+                txt(surface, "◀ PREV" if name == "PREVIOUS" else "NEXT ▶", rect.h * .30,
+                    CREAM if enabled else MUTED, rect.center, "center", True)
+            txt(surface, f"SENSOR PAGE {active_page + 1} / {page_count}", h * .012, CREAM,
+                (grid.centerx, pager["NEXT"].centery), "center", True)
+
+    panel(surface, door_panel, PANEL, BLUE, 10)
+    txt(surface, "SHUTTLE BAY — SHED", h * .023, CREAM,
+        (door_panel.x + 18, door_panel.y + 14), bold=True)
+    door_state = str(door.get("state", "UNKNOWN")).upper()
+    qualified = source_state == "CONNECTED" and door.get("online") is True
+    if not qualified and door_state in ("OPEN", "CLOSED"):
+        display_state = f"LAST KNOWN: {door_state}"
+        door_color = AMBER
+    else:
+        display_state = door_state
+        door_color = GREEN if door_state == "CLOSED" and qualified else AMBER if door_state == "OPEN" else RED
+    lamp_center = (door_panel.centerx, door_panel.y + int(door_panel.h * .30))
+    pygame.draw.circle(surface, BEZEL, lamp_center, int(door_panel.w * .16))
+    pygame.draw.circle(surface, (18, 22, 20), lamp_center, int(door_panel.w * .135))
+    pygame.draw.circle(surface, door_color, lamp_center, int(door_panel.w * .095))
+    txt(surface, display_state, h * (.031 if len(display_state) < 14 else .021), door_color,
+        (door_panel.centerx, door_panel.y + int(door_panel.h * .52)), "center", True)
+    telemetry_card(surface, pygame.Rect(door_panel.x + 18, door_panel.y + int(door_panel.h * .61),
+                                        door_panel.w - 36, int(h * .075)),
+                   "LAST STATE CHANGE", compact_age(door.get("changed_at")),
+                   "DEVICE ONLINE" if door.get("online") else "DEVICE STATUS UNKNOWN",
+                   GREEN if door.get("online") else AMBER, bool(door.get("online")))
+    telemetry_card(surface, pygame.Rect(door_panel.x + 18, door_panel.y + int(door_panel.h * .74),
+                                        door_panel.w - 36, int(h * .075)),
+                   "SENSOR BATTERY", f"LEVEL {door.get('battery', '—')} / 4",
+                   compact_age(door.get("reported_at")), door_color, door.get("battery") is not None)
+    source_age = compact_age(source.get("last_activity"))
+    txt(surface, f"YOLINK {source_state}  •  SOURCE {source_age}",
+        h * .012, state_color, (door_panel.centerx, door_panel.bottom - 16), "midbottom", True)
+    draw_status_nav(surface)
 
 def draw_sad_mac(surface):
     """Full-screen monochrome homage to the original compact-Mac crash icon."""
@@ -1102,7 +1279,7 @@ def draw_destruct_countdown(surface, now):
         (255, 205, 190), (instruction_x, int(h * .935)), "center", True)
 
 def handle_touch(pos, now):
-    global arm_until, shutdown_confirm_until
+    global arm_until, shutdown_confirm_until, status_page, environment_sensor_page
     if shutdown_confirm_until > now:
         controls = shutdown_layout(screen.get_size())
         if controls["confirm"].collidepoint(pos) and not shutdown_pending:
@@ -1116,6 +1293,24 @@ def handle_touch(pos, now):
         select_display_mode(selected_mode)
         return
     if ship_status_active(now):
+        if display_mode == "SHIP STATUS" and status_page == "ENVIRONMENT":
+            sensor_count = len((yolink.snapshot() if yolink else {}).get("temperature_sensors", []))
+            page_count = max(1, math.ceil(sensor_count / 6))
+            pager = environment_pager_layout(screen.get_size())
+            if pager["PREVIOUS"].collidepoint(pos):
+                environment_sensor_page = max(0, environment_sensor_page - 1)
+                mark_activity()
+                return
+            if pager["NEXT"].collidepoint(pos):
+                environment_sensor_page = min(page_count - 1, environment_sensor_page + 1)
+                mark_activity()
+                return
+        selected_page = status_page_at_position(pos, screen.get_size())
+        if display_mode == "SHIP STATUS" and selected_page:
+            status_page = selected_page
+            mark_activity()
+            save_display_mode()
+            return
         # AUTO wake taps are deliberately consumed so the hidden console control
         # underneath cannot fire. Forced SHIP STATUS remains until its selector moves.
         mark_activity()
@@ -1172,6 +1367,8 @@ elif not TEST_MODE:
 threading.Thread(target=system_volume_worker, daemon=True).start()
 if telemetry:
     telemetry.start()
+if yolink:
+    yolink.start()
 
 print(f"MODE: {MODE.upper()} | TEST: {TEST_MODE} | DISPLAY: {screen.get_size()}")
 try:
@@ -1212,7 +1409,10 @@ try:
         elif ui_state == "SAD_MAC":
             draw_sad_mac(screen)
         elif ship_status_active(now):
-            draw_ship_status(screen, now, telemetry.snapshot() if telemetry else {})
+            if status_page == "ENVIRONMENT":
+                draw_environment_status(screen, now, yolink.snapshot() if yolink else {})
+            else:
+                draw_ship_status(screen, now, telemetry.snapshot() if telemetry else {})
         else:
             draw_console(screen, now)
             if countdown_value is not None:
@@ -1226,6 +1426,8 @@ finally:
     afg_event.set()
     if telemetry:
         telemetry.stop()
+    if yolink:
+        yolink.stop()
     stop_siren()
     if pygame.mixer.get_init():
         pygame.mixer.stop()

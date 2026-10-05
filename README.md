@@ -31,6 +31,7 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - **ACOUSTIC FIELD GAIN** touchscreen slider controlling the real PipeWire output from 0–100%
 - Persistent **TRANSPORTER / SHIP STATUS / AUTO** three-position selector
 - Apollo-style Ship Status dashboard with Pi, network, WeatherFlow UDP, and curated MQTT telemetry
+- Separate Environmental Control page for YoLink room sensors and the outside shed contact
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
@@ -90,7 +91,57 @@ tap on Ship Status wakes the transporter and is consumed; a second tap is
 required to activate a control. GPIO buttons remain immediate and active
 sequences always override Ship Status.
 
-Copy `startrek.py` and your audio files into one directory, then run:
+When **SHIP STATUS** is selected, the large bottom controls switch between the
+existing **NETWORK** panel and **ENVIRONMENT**. Environmental Control remains
+quiet and displays `NOT CONFIGURED` until its private YoLink configuration is
+enabled. It does not add audible alerts or crowd the transporter screen.
+
+## YoLink Environmental Control
+
+![Environmental Control page before private YoLink configuration](assets/environment-screenshot.png)
+
+The integration uses an ordinary YoLink account UAC and the existing cloud hub;
+it does not require a Local Hub. HTTPS provides inventory and reconciliation,
+then one read-only MQTT connection receives reports from
+`mqtt.api.yosmart.com:8003`. The official documentation describes this as TCP
+and does not document a TLS setting for that port, so the implementation does
+not silently select an undocumented TLS port. It never publishes or controls a
+device.
+
+Copy the example privately on the Pi and protect it before adding credentials:
+
+```bash
+install -m 600 startrek-yolink.example.json ~/.config/startrek-yolink.json
+```
+
+Create Personal Access Credentials in the YoLink app under **Account → Advanced
+Settings → Personal Access Credentials**, then place the UAC client ID and
+secret in the private file. Keep `enabled` false until setup is complete. After
+enabling it, retrieve a redacted inventory—device names, types, models and IDs,
+but never tokens—with:
+
+```bash
+python3 yolink_telemetry.py --inventory
+```
+
+Put the confirmed outside-shed contact ID in `shed_device_id`. Optional
+`name_overrides` and `sensor_order` maps use stable device IDs. Temperature and
+door observations are retained locally for seven days by default in
+`~/.local/share/startrek-console/yolink-history.db`; credentials and device
+tokens are never stored there.
+
+Until real devices are compared with the YoLink app, `temperature_unit` remains
+an explicit configuration assumption (`C` by default). Missing credentials,
+cloud loss, disconnected MQTT, unavailable history, individual sensor errors,
+and missing reports do not stop the kiosk. A disconnected source qualifies a
+door value as `LAST KNOWN` rather than presenting it as safely current.
+
+The local broker at `snoop433.local:1883` remains a separate, read-only sensor
+bus. The console subscribes only to its curated display topics and publishes
+nothing; raw topic discovery is not exposed on the party UI.
+
+Copy `startrek.py`, `office_telemetry.py`, `yolink_telemetry.py`, and your audio
+files into one directory, then run:
 
 ```bash
 python3 startrek.py --test
