@@ -265,12 +265,15 @@ class YoLinkService:
         }
         if device_type == "THSensor":
             temperature = state.get("temperature")
-            unit = str(state.get("mode") or self._config.get("temperature_unit", "C")).upper()
+            # YoLink THSensor API temperatures are Celsius.  Some YS8017 units
+            # report mode="F" to describe the device/app display preference,
+            # but the numeric API value remains Celsius.
+            unit = "C"
             normalized.update(
                 temperature_raw=temperature,
                 temperature_unit=unit,
-                temperature_f=(float(temperature) * 9 / 5 + 32 if temperature is not None and unit == "C"
-                               else float(temperature) if temperature is not None else None),
+                temperature_f=(float(temperature) * 9 / 5 + 32
+                               if temperature is not None else None),
                 humidity=float(state["humidity"]) if state.get("humidity") is not None else None,
                 alarm=state.get("state") == "alert" or any(bool(value) for value in (state.get("alarm") or {}).values()),
             )

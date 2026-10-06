@@ -29,6 +29,17 @@ class YoLinkNormalizationTests(unittest.TestCase):
         self.assertAlmostEqual(sensor["temperature_f"], 68.0)
         self.assertEqual(sensor["battery"], 3)
 
+    def test_device_fahrenheit_mode_does_not_relabel_celsius_api_value(self):
+        self.service._ingest({
+            "method": "THSensor.getState",
+            "data": {"deviceId": "temp-1", "online": True, "reportAt": "2026-10-05T12:00:00Z",
+                     "state": {"temperature": 2.5, "humidity": 45, "battery": 4,
+                               "mode": "F", "state": "normal", "alarm": {}}},
+        })
+        sensor = self.service.snapshot()["temperature_sensors"][0]
+        self.assertAlmostEqual(sensor["temperature_f"], 36.5)
+        self.assertEqual(sensor["temperature_unit"], "C")
+
     def test_shed_state_and_state_change_are_distinct_from_report_time(self):
         self.service._ingest({
             "method": "DoorSensor.getState",

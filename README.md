@@ -131,8 +131,9 @@ door observations are retained locally for seven days by default in
 `~/.local/share/startrek-console/yolink-history.db`; credentials and device
 tokens are never stored there.
 
-Until real devices are compared with the YoLink app, `temperature_unit` remains
-an explicit configuration assumption (`C` by default). Missing credentials,
+YoLink THSensor API temperatures are normalized from Celsius to Fahrenheit for
+the console, including YS8017 reports whose `mode` field describes the device
+display preference rather than the numeric API unit. Missing credentials,
 cloud loss, disconnected MQTT, unavailable history, individual sensor errors,
 and missing reports do not stop the kiosk. A disconnected source qualifies a
 door value as `LAST KNOWN` rather than presenting it as safely current.
