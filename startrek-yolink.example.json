@@ -1,0 +1,11 @@
+{
+  "enabled": false,
+  "client_id": "YOUR_UAC_CLIENT_ID",
+  "client_secret": "YOUR_UAC_SECRET_KEY",
+  "home_id": "",
+  "shed_device_id": "",
+  "temperature_unit": "C",
+  "history_days": 7,
+  "name_overrides": {},
+  "sensor_order": []
+}

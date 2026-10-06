@@ -29,6 +29,10 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Full-screen pulsing red self-destruct numerals with persistent abort guidance
 - Illuminated countdown-screen ABORT control aligned exactly with its live touch target
 - **ACOUSTIC FIELD GAIN** touchscreen slider controlling the real PipeWire output from 0–100%
+- Persistent **TRANSPORTER / SHIP STATUS / AUTO** three-position selector
+- Apollo-style Ship Status dashboard with Pi, network, WeatherFlow UDP, and curated MQTT telemetry
+- Separate Environmental Control page for YoLink room sensors and the outside shed contact
+- Paginated House Systems page with selected SmartThings groups and Lewisville water data
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
@@ -59,13 +63,113 @@ Install dependencies:
 
 ```bash
 sudo apt update
-sudo apt install python3-pygame python3-rpi.gpio
+sudo apt install python3-pygame python3-rpi.gpio python3-psutil python3-paho-mqtt
 ```
 
 The volume control also requires `wpctl`, supplied by the Raspberry Pi OS
 `wireplumber` package.
 
-Copy `startrek.py` and your audio files into one directory, then run:
+Install `office_telemetry.py` beside `startrek.py`. Ship Status reads only local
+data: Pi health, `wlan0` and `eth0`, WeatherFlow UDP broadcasts on port 50222,
+and selected MQTT topics from `snoop433.local:1883`. It does not publish MQTT
+messages or require cloud credentials.
+
+## Ship Status selector
+
+![Apollo-style Ship Status dashboard at 1920×1080](assets/ship-status-screenshot.png)
+
+The Apollo-style, panel-mounted rotary selector is present in the left
+instrument rail on both dashboards:
+
+- **TRANSPORTER** keeps the primary control console visible.
+- **SHIP STATUS** keeps the read-only telemetry console visible.
+- **AUTO** returns to the transporter on activity and enters Ship Status after
+  two READY-state idle minutes.
+
+The selected position is stored in `~/.config/startrek-console.json` and
+survives application and Raspberry Pi restarts. In AUTO, the first touchscreen
+tap on Ship Status wakes the transporter and is consumed; a second tap is
+required to activate a control. GPIO buttons remain immediate and active
+sequences always override Ship Status.
+
+When **SHIP STATUS** is selected, the large bottom controls switch between the
+existing **NETWORK** panel and **ENVIRONMENT**. Environmental Control remains
+quiet and displays `NOT CONFIGURED` until its private YoLink configuration is
+enabled. It does not add audible alerts or crowd the transporter screen.
+
+## YoLink Environmental Control
+
+![Environmental Control page before private YoLink configuration](assets/environment-screenshot.png)
+
+The integration uses an ordinary YoLink account UAC and the existing cloud hub;
+it does not require a Local Hub. HTTPS provides inventory and reconciliation,
+then one read-only MQTT connection receives reports from
+`mqtt.api.yosmart.com:8003`. The official documentation describes this as TCP
+and does not document a TLS setting for that port, so the implementation does
+not silently select an undocumented TLS port. It never publishes or controls a
+device.
+
+Copy the example privately on the Pi and protect it before adding credentials:
+
+```bash
+install -m 600 startrek-yolink.example.json ~/.config/startrek-yolink.json
+```
+
+Create Personal Access Credentials in the YoLink app under **Account → Advanced
+Settings → Personal Access Credentials**, then place the UAC client ID and
+secret in the private file. Keep `enabled` false until setup is complete. After
+enabling it, retrieve a redacted inventory—device names, types, models and IDs,
+but never tokens—with:
+
+```bash
+python3 yolink_telemetry.py --inventory
+```
+
+Put the confirmed outside-shed contact ID in `shed_device_id`. Optional
+`name_overrides` and `sensor_order` maps use stable device IDs. Temperature and
+door observations are retained locally for seven days by default in
+`~/.local/share/startrek-console/yolink-history.db`; credentials and device
+tokens are never stored there.
+
+YoLink THSensor API temperatures are normalized from Celsius to Fahrenheit for
+the console, including YS8017 reports whose `mode` field describes the device
+display preference rather than the numeric API unit. Missing credentials,
+cloud loss, disconnected MQTT, unavailable history, individual sensor errors,
+and missing reports do not stop the kiosk. A disconnected source qualifies a
+door value as `LAST KNOWN` rather than presenting it as safely current.
+
+The local broker at `snoop433.local:1883` remains a separate, read-only sensor
+bus. The console subscribes only to its curated display topics and publishes
+nothing; raw topic discovery is not exposed on the party UI.
+
+## House Systems and water resources
+
+![House Systems page with Lewisville Reservoir and Trinity outflow](assets/house-systems-screenshot.png)
+
+The **HOUSE SYSTEMS** page groups Greg's selected retained SmartThings topics
+into Back Yard, Bar, Breakfast Nook, Couch, Dining Room, Family Room, Fence,
+Garage Refrigerator, Hallway, and Patio panels. It extracts only useful status
+capabilities such as switch state, dimmer level, audio playback/volume, device
+health, temperature, and water state. Old retained values retain their actual
+report age instead of being presented as fresh observations. The page is
+read-only and paginates six groups at a time.
+
+Water Resources polls the primary USGS feeds directly every 15 minutes in a
+background worker, while retaining the existing MQTT topics as fallback:
+
+- Lewisville Lake: site `08052800`, parameter `62614` (reservoir elevation,
+  feet above NGVD 1929)
+- Elm Fork Trinity River: site `08053000`, parameters `00060` (discharge in
+  cubic feet per second) and `00065` (gage height in feet)
+
+The reservoir instrument uses Greg's supplied reference elevations: dead pool
+481 ft, normal 522 ft, spillway crest 532 ft, and emergency level 552 ft. These
+are labeled reference marks, not invented warning bands. Failed responses are
+shown as `DATA LINK FAULT`; a previously valid measurement remains explicitly
+qualified as `LAST VALID` rather than being replaced with zero.
+
+Copy `startrek.py`, `office_telemetry.py`, `yolink_telemetry.py`, and your audio
+files into one directory, then run:
 
 ```bash
 python3 startrek.py --test
@@ -82,6 +186,10 @@ For the full Raspberry Pi kiosk with GPIO enabled:
 ```bash
 python3 startrek.py --mode=both
 ```
+
+For a short AUTO commissioning test, `--office-timeout=5` temporarily reduces
+the idle delay without changing the saved selector position. The production
+default remains 120 seconds.
 
 ## Audio files
 
