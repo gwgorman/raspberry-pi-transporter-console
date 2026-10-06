@@ -32,6 +32,7 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Persistent **TRANSPORTER / SHIP STATUS / AUTO** three-position selector
 - Apollo-style Ship Status dashboard with Pi, network, WeatherFlow UDP, and curated MQTT telemetry
 - Separate Environmental Control page for YoLink room sensors and the outside shed contact
+- Paginated House Systems page with selected SmartThings groups and Lewisville water data
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
@@ -139,6 +140,32 @@ door value as `LAST KNOWN` rather than presenting it as safely current.
 The local broker at `snoop433.local:1883` remains a separate, read-only sensor
 bus. The console subscribes only to its curated display topics and publishes
 nothing; raw topic discovery is not exposed on the party UI.
+
+## House Systems and water resources
+
+![House Systems page with Lewisville Reservoir and Trinity outflow](assets/house-systems-screenshot.png)
+
+The **HOUSE SYSTEMS** page groups Greg's selected retained SmartThings topics
+into Back Yard, Bar, Breakfast Nook, Couch, Dining Room, Family Room, Fence,
+Garage Refrigerator, Hallway, and Patio panels. It extracts only useful status
+capabilities such as switch state, dimmer level, audio playback/volume, device
+health, temperature, and water state. Old retained values retain their actual
+report age instead of being presented as fresh observations. The page is
+read-only and paginates six groups at a time.
+
+Water Resources polls the primary USGS feeds directly every 15 minutes in a
+background worker, while retaining the existing MQTT topics as fallback:
+
+- Lewisville Lake: site `08052800`, parameter `62614` (reservoir elevation,
+  feet above NGVD 1929)
+- Elm Fork Trinity River: site `08053000`, parameters `00060` (discharge in
+  cubic feet per second) and `00065` (gage height in feet)
+
+The reservoir instrument uses Greg's supplied reference elevations: dead pool
+481 ft, normal 522 ft, spillway crest 532 ft, and emergency level 552 ft. These
+are labeled reference marks, not invented warning bands. Failed responses are
+shown as `DATA LINK FAULT`; a previously valid measurement remains explicitly
+qualified as `LAST VALID` rather than being replaced with zero.
 
 Copy `startrek.py`, `office_telemetry.py`, `yolink_telemetry.py`, and your audio
 files into one directory, then run:

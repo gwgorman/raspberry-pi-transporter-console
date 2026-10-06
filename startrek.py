@@ -68,7 +68,7 @@ def load_console_preferences():
             mode = config.get("display_mode", "AUTO")
             page = config.get("status_page", "NETWORK")
             return (mode if mode in ("TRANSPORTER", "SHIP STATUS", "AUTO") else "AUTO",
-                    page if page in ("NETWORK", "ENVIRONMENT") else "NETWORK")
+                    page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS") else "NETWORK")
     except (OSError, ValueError, TypeError):
         return "AUTO", "NETWORK"
 
@@ -76,6 +76,7 @@ display_mode, status_page = load_console_preferences()
 telemetry = TelemetryService() if TelemetryService else None
 yolink = YoLinkService() if YoLinkService else None
 environment_sensor_page = 0
+house_system_page = 0
 
 BLACK, NAVY = (4, 7, 12), (8, 18, 30)
 PANEL, PANEL_2 = (14, 31, 45), (18, 42, 58)
@@ -624,10 +625,12 @@ def status_nav_layout(size):
     footer = pygame.Rect(r["mode_selector"].right + gap, size[1] - int(size[1] * .075),
                          size[0] - r["mode_selector"].right - gap - int(size[0] * .018),
                          int(size[1] * .052))
-    half = (footer.w - gap) // 2
+    third = (footer.w - gap * 2) // 3
     return {
-        "NETWORK": pygame.Rect(footer.x, footer.y, half, footer.h),
-        "ENVIRONMENT": pygame.Rect(footer.x + half + gap, footer.y, footer.w - half - gap, footer.h),
+        "NETWORK": pygame.Rect(footer.x, footer.y, third, footer.h),
+        "ENVIRONMENT": pygame.Rect(footer.x + third + gap, footer.y, third, footer.h),
+        "HOUSE SYSTEMS": pygame.Rect(footer.x + (third + gap) * 2, footer.y,
+                                     footer.w - third * 2 - gap * 2, footer.h),
     }
 
 def status_page_at_position(pos, size):
@@ -639,7 +642,7 @@ def status_page_at_position(pos, size):
 def draw_status_nav(surface):
     for page, rect in status_nav_layout(surface.get_size()).items():
         selected = status_page == page
-        color = CYAN if page == "NETWORK" else AMBER
+        color = CYAN if page == "NETWORK" else AMBER if page == "ENVIRONMENT" else GREEN
         pygame.draw.rect(surface, tuple(channel // (4 if selected else 8) for channel in color),
                          rect, border_radius=5)
         pygame.draw.rect(surface, color if selected else BEZEL, rect, 3, border_radius=5)
@@ -653,6 +656,20 @@ def environment_pager_layout(size):
     content_x = r["mode_selector"].right + gap
     content_w = w - margin - content_x
     grid_w = content_w - int(content_w * .29) - gap
+    y = status_nav_layout(size)["NETWORK"].y - int(h * .047)
+    return {
+        "PREVIOUS": pygame.Rect(content_x + 18, y, int(w * .085), int(h * .035)),
+        "NEXT": pygame.Rect(content_x + grid_w - 18 - int(w * .085), y,
+                            int(w * .085), int(h * .035)),
+    }
+
+def house_pager_layout(size):
+    r = layout(size)
+    w, h = size
+    gap, margin = int(w * .012), int(w * .018)
+    content_x = r["mode_selector"].right + gap
+    content_w = w - margin - content_x
+    grid_w = int(content_w * .63)
     y = status_nav_layout(size)["NETWORK"].y - int(h * .047)
     return {
         "PREVIOUS": pygame.Rect(content_x + 18, y, int(w * .085), int(h * .035)),
@@ -1169,6 +1186,180 @@ def draw_environment_status(surface, now, data):
         h * .012, state_color, (door_panel.centerx, door_panel.bottom - 16), "midbottom", True)
     draw_status_nav(surface)
 
+HOUSE_GROUP_ORDER = ("BACK YARD", "BAR", "BREAKFAST NOOK", "COUCH", "DINING ROOM",
+                     "FAMILY ROOM", "FENCE", "GARAGE REFRIGERATOR", "HALLWAY", "PATIO")
+
+def grouped_house_systems(data):
+    grouped = {name: [] for name in HOUSE_GROUP_ORDER}
+    for item in data.get("house", {}).get("systems", {}).values():
+        if item.get("group") in grouped:
+            grouped[item["group"]].append(item)
+    return [(name, grouped[name]) for name in HOUSE_GROUP_ORDER]
+
+def house_group_lines(devices):
+    switches = [item.get("switch") for item in devices if item.get("switch") in ("on", "off")]
+    playing = [item for item in devices if item.get("playbackStatus")]
+    water = [item.get("water") for item in devices if item.get("water")]
+    temperatures = [item.get("temperature") for item in devices if item.get("temperature") is not None]
+    online = [item.get("DeviceWatch-DeviceStatus") for item in devices
+              if item.get("DeviceWatch-DeviceStatus")]
+    lines = []
+    if switches:
+        lines.append(f"{sum(value == 'on' for value in switches)} ON  /  {len(switches)} CONTROLS")
+    if playing:
+        audio = playing[0]
+        volume = audio.get("volume", audio.get("groupVolume"))
+        lines.append(f"AUDIO {str(audio.get('playbackStatus')).upper()}  •  VOL {volume if volume is not None else '—'}")
+    if water:
+        lines.append("WATER " + " / ".join(str(value).upper() for value in water))
+    if temperatures:
+        lines.append(f"THERMAL {float(temperatures[0]):.1f} °F")
+    if online:
+        lines.append(f"LINK {sum(value == 'online' for value in online)}/{len(online)} ONLINE")
+    if not lines:
+        lines.append("NO USABLE CAPABILITY DATA")
+    updated = max((item.get("updated", 0) for item in devices), default=0)
+    return lines[:3], updated
+
+def draw_house_card(surface, rect, group, devices):
+    lines, updated = house_group_lines(devices)
+    stale = not updated or time.time() - updated > 7 * 86400
+    fault = not devices or lines[0] == "NO USABLE CAPABILITY DATA"
+    color = RED if fault else AMBER if stale else GREEN
+    panel(surface, rect, (8, 16, 17), BEZEL, 5)
+    pygame.draw.circle(surface, BEZEL, (rect.x + 18, rect.y + 20), 9)
+    pygame.draw.circle(surface, color, (rect.x + 18, rect.y + 20), 5)
+    txt(surface, group, rect.h * .15, CREAM, (rect.x + 35, rect.y + 10), bold=True)
+    txt(surface, compact_age(updated), rect.h * .095, color, (rect.right - 12, rect.y + 12), "topright", True)
+    line_y = rect.y + int(rect.h * .43)
+    for index, line in enumerate(lines):
+        txt(surface, line, rect.h * (.14 if index == 0 else .105), WHITE if index == 0 else MUTED,
+            (rect.x + 15, line_y + index * int(rect.h * .20)), "midleft", index == 0)
+
+def draw_reservoir_scale(surface, rect, lake):
+    panel(surface, rect, (6, 13, 15), BEZEL, 5)
+    txt(surface, "LEWISVILLE RESERVOIR", rect.h * .055, CREAM, (rect.x + 16, rect.y + 12), bold=True)
+    txt(surface, f"USGS PROV • {compact_age(lake.get('updated'))}", rect.h * .030, MUTED,
+        (rect.right - 14, rect.y + 14), "topright", True)
+    elevation = lake.get("elevation_ft")
+    fault = lake.get("error") or elevation is None
+    txt(surface, f"{elevation:06.2f} FT" if elevation is not None else "DATA LINK FAULT",
+        rect.h * .090, RED if fault else WHITE, (rect.centerx, rect.y + int(rect.h * .22)), "center", True)
+    track = pygame.Rect(rect.x + 35, rect.y + int(rect.h * .42), rect.w - 70, int(rect.h * .12))
+    pygame.draw.rect(surface, (3, 8, 9), track)
+    pygame.draw.rect(surface, BEZEL, track, 3)
+    minimum, maximum = 481.0, 552.0
+    if elevation is not None:
+        fraction = max(0, min(1, (float(elevation) - minimum) / (maximum - minimum)))
+        fill_color = RED if elevation >= 552 else ORANGE if elevation >= 532 else CYAN
+        pygame.draw.rect(surface, tuple(channel // 4 for channel in fill_color),
+                         pygame.Rect(track.x + 3, track.y + 3, int((track.w - 6) * fraction), track.h - 6))
+        x = track.x + int(track.w * fraction)
+        pygame.draw.polygon(surface, fill_color,
+                            ((x, track.y - 11), (x - 8, track.y - 1), (x + 8, track.y - 1)))
+    markers = ((481, "DEAD", RED, 0), (522, "NORMAL", GREEN, 0),
+               (532, "SPILL", ORANGE, 1), (552, "EMERG", RED, 0))
+    for value, label, color, row in markers:
+        x = track.x + int(track.w * (value - minimum) / (maximum - minimum))
+        pygame.draw.line(surface, color, (x, track.y), (x, track.bottom + 10), 3)
+        anchor = "topleft" if value == 481 else "topright" if value == 552 else "midtop"
+        label_x = track.x if value == 481 else track.right if value == 552 else x
+        txt(surface, f"{value} {label}", rect.h * .028, color,
+            (label_x, track.bottom + 12 + row * int(rect.h * .055)), anchor, True)
+    if elevation is not None:
+        delta = float(elevation) - 522.0
+        detail = f"{abs(delta):.2f} FT {'ABOVE' if delta >= 0 else 'BELOW'} NORMAL"
+        to_spillway = 532.0 - float(elevation)
+        if to_spillway >= 0:
+            detail += f"  •  {to_spillway:.2f} FT TO SPILLWAY"
+        if lake.get("error"):
+            detail = f"LAST VALID {compact_age(lake.get('updated'))}  •  {lake['error']}"
+        txt(surface, detail, rect.h * .038, RED if lake.get("error") else AMBER if elevation >= 532 else CREAM,
+            (rect.centerx, rect.bottom - 18), "midbottom", True)
+    else:
+        txt(surface, lake.get("error") or "NO RESERVOIR REPORT", rect.h * .038, RED,
+            (rect.centerx, rect.bottom - 18), "midbottom", True)
+
+def draw_house_status(surface, now, data):
+    r, w, h = layout(surface.get_size()), *surface.get_size()
+    surface.fill(BLACK)
+    panel(surface, r["header"], NAVY, CYAN)
+    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
+        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    txt(surface, "HOUSE SYSTEMS MONITOR", h * .047, WHITE,
+        (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
+    draw_mode_selector(surface, r["mode_selector"])
+    mqtt_info = data.get("mqtt", {})
+    connected = bool(mqtt_info.get("connected"))
+    link_color = GREEN if connected else RED
+    pygame.draw.circle(surface, link_color, (r["header"].right - 38, r["header"].centery), 14)
+    txt(surface, "LOCAL BUS ONLINE" if connected else "LOCAL BUS OFFLINE", h * .024, link_color,
+        (r["header"].right - 66, r["header"].centery), "midright", True)
+
+    gap, margin = int(w * .012), int(w * .018)
+    body_y = r["header"].bottom + gap
+    body_h = status_nav_layout(surface.get_size())["NETWORK"].y - body_y - gap
+    content_x = r["mode_selector"].right + gap
+    content_w = w - margin - content_x
+    grid_w = int(content_w * .63)
+    grid = pygame.Rect(content_x, body_y, grid_w, body_h)
+    water_panel = pygame.Rect(grid.right + gap, body_y, content_w - grid_w - gap, body_h)
+    panel(surface, grid, PANEL, BLUE, 10)
+    txt(surface, "SELECTED HABITATION SYSTEMS", h * .024, CREAM,
+        (grid.x + 18, grid.y + 14), bold=True)
+    groups = grouped_house_systems(data)
+    page_size, page_count = 6, max(1, math.ceil(len(groups) / 6))
+    active_page = min(house_system_page, page_count - 1)
+    shown = groups[active_page * page_size:(active_page + 1) * page_size]
+    card_gap, top = 12, grid.y + 58
+    card_w = (grid.w - 36 - card_gap) // 2
+    pager = house_pager_layout(surface.get_size())
+    cards_bottom = pager["PREVIOUS"].y - 8 if page_count > 1 else grid.bottom - 18
+    card_h = (cards_bottom - top - card_gap * 2) // 3
+    for index, (group, devices) in enumerate(shown):
+        col, row = index % 2, index // 2
+        draw_house_card(surface, pygame.Rect(grid.x + 18 + col * (card_w + card_gap),
+                                             top + row * (card_h + card_gap), card_w, card_h),
+                        group, devices)
+    if page_count > 1:
+        for name, rect in pager.items():
+            enabled = (name == "PREVIOUS" and active_page > 0) or (name == "NEXT" and active_page + 1 < page_count)
+            pygame.draw.rect(surface, (45, 48, 44), rect, border_radius=3)
+            pygame.draw.rect(surface, GREEN if enabled else BEZEL, rect, 2, border_radius=3)
+            txt(surface, "◀ PREV" if name == "PREVIOUS" else "NEXT ▶", rect.h * .30,
+                CREAM if enabled else MUTED, rect.center, "center", True)
+        txt(surface, f"SYSTEM PAGE {active_page + 1} / {page_count}", h * .012, CREAM,
+            (grid.centerx, pager["NEXT"].centery), "center", True)
+
+    panel(surface, water_panel, PANEL, BLUE, 10)
+    txt(surface, "WATER RESOURCES", h * .024, CREAM,
+        (water_panel.x + 18, water_panel.y + 14), bold=True)
+    water = data.get("water", {})
+    lake_rect = pygame.Rect(water_panel.x + 16, water_panel.y + 54,
+                            water_panel.w - 32, int(water_panel.h * .53))
+    draw_reservoir_scale(surface, lake_rect, water.get("lake", {}))
+    trinity = water.get("trinity", {})
+    river_rect = pygame.Rect(water_panel.x + 16, lake_rect.bottom + 14,
+                             water_panel.w - 32, water_panel.bottom - lake_rect.bottom - 30)
+    panel(surface, river_rect, (6, 13, 15), BEZEL, 5)
+    txt(surface, "TRINITY OUTFLOW", river_rect.h * .11, CREAM,
+        (river_rect.x + 15, river_rect.y + 11), bold=True)
+    txt(surface, f"USGS PROV • {compact_age(trinity.get('updated'))}", river_rect.h * .055, MUTED,
+        (river_rect.right - 14, river_rect.y + 14), "topright", True)
+    flow = trinity.get("flow_cfs")
+    gage = trinity.get("gage_ft")
+    if flow is not None:
+        value = f"{flow:,.0f} CFS"
+        detail = f"GAGE {gage:.2f} FT" if gage is not None else "GAGE NOT REPORTED"
+        if trinity.get("error"):
+            detail = f"LAST VALID {compact_age(trinity.get('updated'))}  •  {trinity['error']}"
+        color = RED if trinity.get("error") else CYAN
+    else:
+        value, detail, color = "DATA LINK FAULT", trinity.get("error") or "NO OUTFLOW REPORT", RED
+    txt(surface, value, river_rect.h * .18, color, (river_rect.centerx, river_rect.centery - 3), "center", True)
+    txt(surface, detail, river_rect.h * .09, MUTED, (river_rect.centerx, river_rect.bottom - 17), "midbottom", True)
+    draw_status_nav(surface)
+
 def draw_sad_mac(surface):
     """Full-screen monochrome homage to the original compact-Mac crash icon."""
     w, h = surface.get_size()
@@ -1279,7 +1470,7 @@ def draw_destruct_countdown(surface, now):
         (255, 205, 190), (instruction_x, int(h * .935)), "center", True)
 
 def handle_touch(pos, now):
-    global arm_until, shutdown_confirm_until, status_page, environment_sensor_page
+    global arm_until, shutdown_confirm_until, status_page, environment_sensor_page, house_system_page
     if shutdown_confirm_until > now:
         controls = shutdown_layout(screen.get_size())
         if controls["confirm"].collidepoint(pos) and not shutdown_pending:
@@ -1299,6 +1490,18 @@ def handle_touch(pos, now):
             pager = environment_pager_layout(screen.get_size())
             if pager["PREVIOUS"].collidepoint(pos):
                 environment_sensor_page = max(0, environment_sensor_page - 1)
+                mark_activity()
+                return
+        if display_mode == "SHIP STATUS" and status_page == "HOUSE SYSTEMS":
+            page_count = max(1, math.ceil(len(grouped_house_systems(
+                telemetry.snapshot() if telemetry else {})) / 6))
+            pager = house_pager_layout(screen.get_size())
+            if pager["PREVIOUS"].collidepoint(pos):
+                house_system_page = max(0, house_system_page - 1)
+                mark_activity()
+                return
+            if pager["NEXT"].collidepoint(pos):
+                house_system_page = min(page_count - 1, house_system_page + 1)
                 mark_activity()
                 return
             if pager["NEXT"].collidepoint(pos):
@@ -1411,6 +1614,8 @@ try:
         elif ship_status_active(now):
             if status_page == "ENVIRONMENT":
                 draw_environment_status(screen, now, yolink.snapshot() if yolink else {})
+            elif status_page == "HOUSE SYSTEMS":
+                draw_house_status(screen, now, telemetry.snapshot() if telemetry else {})
             else:
                 draw_ship_status(screen, now, telemetry.snapshot() if telemetry else {})
         else:

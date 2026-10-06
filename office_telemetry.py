@@ -10,6 +10,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.request
 
 try:
     import psutil
@@ -25,6 +26,13 @@ except ImportError:
 MQTT_HOST = "snoop433.local"
 MQTT_PORT = 1883
 WEATHERFLOW_PORT = 50222
+USGS_REFRESH_SECONDS = 900
+USGS_URLS = {
+    "lake": ("LewisvilleLake", "https://waterservices.usgs.gov/nwis/iv/"
+             "?format=json&sites=08052800&siteStatus=all"),
+    "trinity": ("TrinityRiver", "https://waterservices.usgs.gov/nwis/iv/"
+                "?format=json&sites=08053000&parameterCd=00060%2C00065&siteStatus=all"),
+}
 
 HOUSE_TOPICS = (
     "HourlyForecast",
@@ -39,7 +47,51 @@ HOUSE_TOPICS = (
     "smartthings/Attic AC Overflow",
     "smartthings/Centralite Water Leak Sensor",
     "smartthings/Ice Maker",
+    "LewisvilleLake",
+    "TrinityRiver",
+    "smartthings/Back Yard",
+    "smartthings/Bar Front",
+    "smartthings/Bar Overhead",
+    "smartthings/Bar Signs",
+    "smartthings/Bar2",
+    "smartthings/bar1",
+    "smartthings/Breakfast Nook",
+    "smartthings/Couch 1",
+    "smartthings/Couch 2",
+    "smartthings/Dining Room",
+    "smartthings/Dining Room Chandelier",
+    "smartthings/Dining Room Overhead",
+    "smartthings/Family Room",
+    "smartthings/Family Room Fan Light",
+    "smartthings/Family Room Fan Motor",
+    "smartthings/Family Room Fireplace Light",
+    "smartthings/Family Room Overhead",
+    "smartthings/Fence 1",
+    "smartthings/Garage Refrigerator",
+    "smartthings/Hallway Overhead",
+    "smartthings/Patio",
+    "smartthings/Patio Lights 1",
+    "smartthings/Patio Lights 2",
+    "smartthings/Patio Lights 3",
+    "smartthings/Patio Speakers",
 )
+
+SYSTEM_GROUPS = {
+    "Back Yard": "BACK YARD",
+    "Bar Front": "BAR", "Bar Overhead": "BAR", "Bar Signs": "BAR",
+    "Bar Sink Leak": "BAR", "Bar2": "BAR", "bar1": "BAR",
+    "Breakfast Nook": "BREAKFAST NOOK",
+    "Couch 1": "COUCH", "Couch 2": "COUCH",
+    "Dining Room": "DINING ROOM", "Dining Room Chandelier": "DINING ROOM",
+    "Dining Room Overhead": "DINING ROOM",
+    "Family Room": "FAMILY ROOM", "Family Room Fan Light": "FAMILY ROOM",
+    "Family Room Fan Motor": "FAMILY ROOM", "Family Room Fireplace Light": "FAMILY ROOM",
+    "Family Room Overhead": "FAMILY ROOM",
+    "Fence 1": "FENCE", "Garage Refrigerator": "GARAGE REFRIGERATOR",
+    "Hallway Overhead": "HALLWAY", "Patio": "PATIO",
+    "Patio Lights 1": "PATIO", "Patio Lights 2": "PATIO",
+    "Patio Lights 3": "PATIO", "Patio Speakers": "PATIO",
+}
 
 
 def _iso_epoch(value):
@@ -64,6 +116,107 @@ def _capability(payload, name):
     return None, 0.0, None
 
 
+def _smartthings_summary(payload):
+    """Extract only display-safe capability values from a retained device payload."""
+    summary = {}
+    for capability in ("switch", "level", "playbackStatus", "volume", "groupVolume",
+                       "mute", "contact", "temperature", "humidity", "water", "battery",
+                       "DeviceWatch-DeviceStatus"):
+        value, stamp, unit = _capability(payload, capability)
+        if value is not None:
+            summary[capability] = value
+            if unit:
+                summary[f"{capability}_unit"] = unit
+            summary["updated"] = max(summary.get("updated", 0.0), stamp)
+    return summary
+
+
+def _walk_mapping(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_mapping(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_mapping(child)
+
+
+def _water_summary(topic, payload, now):
+    """Parse known water shapes conservatively; an error is never rendered as zero."""
+    result = {"updated": now, "error": "", "raw_ok": False}
+    if isinstance(payload, str):
+        preview = payload.lower()
+        if "error" in preview or "<!doctype" in preview or "aborted" in preview:
+            result["error"] = "DATA LINK FAULT"
+            return result
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError):
+            try:
+                number = float(payload.strip())
+            except (TypeError, ValueError):
+                result["error"] = "UNRECOGNIZED FEED"
+                return result
+            if topic == "LewisvilleLake":
+                result.update(elevation_ft=number, raw_ok=True)
+            else:
+                result.update(flow_cfs=number, raw_ok=True)
+            return result
+    if isinstance(payload, (int, float)):
+        result.update(raw_ok=True)
+        result["elevation_ft" if topic == "LewisvilleLake" else "flow_cfs"] = float(payload)
+        return result
+    # Handle USGS JSON time-series and simple named-key collectors without guessing
+    # which anonymous number represents lake elevation or discharge.
+    for mapping in _walk_mapping(payload):
+        lowered = {str(key).lower(): value for key, value in mapping.items()}
+        for key in ("elevation_ft", "elevation", "lakelevel", "lake_level", "reservoir_elevation"):
+            if key in lowered:
+                try:
+                    result["elevation_ft"] = float(lowered[key])
+                    result["raw_ok"] = True
+                except (TypeError, ValueError):
+                    pass
+        for key in ("flow_cfs", "discharge", "streamflow", "flow"):
+            if key in lowered:
+                try:
+                    result["flow_cfs"] = float(lowered[key])
+                    result["raw_ok"] = True
+                except (TypeError, ValueError):
+                    pass
+        for key in ("gage_ft", "gageheight", "gage_height", "height"):
+            if key in lowered:
+                try:
+                    result["gage_ft"] = float(lowered[key])
+                    result["raw_ok"] = True
+                except (TypeError, ValueError):
+                    pass
+        variable = mapping.get("variable") if isinstance(mapping, dict) else None
+        values = mapping.get("values") if isinstance(mapping, dict) else None
+        if isinstance(variable, dict) and isinstance(values, list) and values:
+            codes = variable.get("variableCode") or []
+            code = str(codes[0].get("value", "")) if codes and isinstance(codes[0], dict) else ""
+            try:
+                sample = values[0].get("value", [])[-1]
+                number = float(sample.get("value"))
+                stamp = _iso_epoch(sample.get("dateTime"))
+                if code == "00060":
+                    result["flow_cfs"] = number
+                elif code == "00065":
+                    result["gage_ft"] = number
+                elif code == "62614":
+                    result["elevation_ft"] = number
+                else:
+                    continue
+                result["updated"] = stamp or now
+                result["raw_ok"] = True
+            except (AttributeError, IndexError, TypeError, ValueError):
+                pass
+    if not result["raw_ok"]:
+        result["error"] = "UNRECOGNIZED FEED"
+    return result
+
+
 class TelemetryService:
     """Collect system, WeatherFlow, and selected MQTT data off the UI thread."""
 
@@ -77,7 +230,8 @@ class TelemetryService:
             "network": {},
             "weather": {},
             "forecast": {},
-            "house": {"leaks": {}},
+            "house": {"leaks": {}, "systems": {}},
+            "water": {"lake": {}, "trinity": {}},
             "mqtt": {"connected": False, "updated": 0.0, "error": "STARTING"},
             "weatherflow": {"connected": False, "updated": 0.0, "error": "WAITING"},
         }
@@ -88,7 +242,8 @@ class TelemetryService:
             return
         for target, name in ((self._system_loop, "ship-system-telemetry"),
                              (self._weather_loop, "ship-weatherflow"),
-                             (self._mqtt_loop, "ship-mqtt")):
+                             (self._mqtt_loop, "ship-mqtt"),
+                             (self._usgs_loop, "ship-usgs-water")):
             thread = threading.Thread(target=target, name=name, daemon=True)
             thread.start()
             self._threads.append(thread)
@@ -197,6 +352,33 @@ class TelemetryService:
                 if sock:
                     sock.close()
 
+    def _merge_water(self, source, summary, now=None):
+        now = now or time.time()
+        with self._lock:
+            previous = self._data["water"].get(source, {})
+            if not summary.get("raw_ok") and previous.get("raw_ok"):
+                previous.update(error=summary.get("error", "DATA LINK FAULT"),
+                                link_updated=summary.get("updated", now))
+            else:
+                summary["link_updated"] = now
+                self._data["water"][source] = summary
+
+    def _usgs_loop(self):
+        """Poll primary USGS feeds directly; MQTT remains a local fallback."""
+        while not self._stop.is_set():
+            for source, (topic, url) in USGS_URLS.items():
+                try:
+                    request = urllib.request.Request(url, headers={"User-Agent": "startrek-console/1.0"})
+                    with urllib.request.urlopen(request, timeout=15) as response:
+                        payload = json.load(response)
+                    summary = _water_summary(topic, payload, time.time())
+                    summary["source"] = "USGS DIRECT"
+                except Exception:
+                    summary = {"raw_ok": False, "error": "USGS LINK FAULT",
+                               "updated": time.time(), "source": "USGS DIRECT"}
+                self._merge_water(source, summary)
+            self._stop.wait(USGS_REFRESH_SECONDS)
+
     def _handle_weather(self, packet):
         kind, now = packet.get("type"), time.time()
         values = {}
@@ -256,16 +438,21 @@ class TelemetryService:
         if connected:
             client.subscribe([(topic, 0) for topic in HOUSE_TOPICS])
 
-    def _mqtt_disconnect(self, _client, _userdata, _flags, reason_code, _properties=None):
+    def _mqtt_disconnect(self, _client, _userdata, *callback_args):
+        reason_code = callback_args[-2] if len(callback_args) >= 2 else callback_args[-1] if callback_args else 0
         with self._lock:
             self._data["mqtt"].update(connected=False, error=f"DISCONNECTED {reason_code}")
 
     def _mqtt_message(self, _client, _userdata, message):
         now = time.time()
         try:
-            payload = json.loads(message.payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+            text_payload = message.payload.decode("utf-8")
+        except UnicodeDecodeError:
             return
+        try:
+            payload = json.loads(text_payload)
+        except json.JSONDecodeError:
+            payload = text_payload
         topic = message.topic
         updates = {}
         if topic == "HourlyForecast" and isinstance(payload, list) and payload:
@@ -288,6 +475,13 @@ class TelemetryService:
         elif "Leak" in topic or topic.endswith("Ice Maker"):
             water, stamp, _ = _capability(payload, "water")
             updates = {"leak": (topic.split("/", 1)[-1], water, stamp)}
+        if topic in ("LewisvilleLake", "TrinityRiver"):
+            updates["water_source"] = ("lake" if topic == "LewisvilleLake" else "trinity",
+                                       _water_summary(topic, payload, now))
+        elif topic.startswith("smartthings/"):
+            name = topic.split("/", 1)[1]
+            if name in SYSTEM_GROUPS:
+                updates["system"] = (name, SYSTEM_GROUPS[name], _smartthings_summary(payload))
         with self._lock:
             if "forecast" in updates:
                 self._data["forecast"].update(updates["forecast"])
@@ -297,4 +491,15 @@ class TelemetryService:
                 name, state, stamp = updates["leak"]
                 self._data["house"].setdefault("leaks", {})[name] = {
                     "state": state, "updated": stamp}
+            if "system" in updates:
+                name, group, summary = updates["system"]
+                summary.update(name=name, group=group, received=now)
+                self._data["house"].setdefault("systems", {})[name] = summary
+            if "water_source" in updates:
+                source, summary = updates["water_source"]
+                # Do not let a failing local collector overwrite fresh direct USGS data.
+                current = self._data["water"].get(source, {})
+                if current.get("source") != "USGS DIRECT" or not current.get("raw_ok"):
+                    summary["source"] = "LOCAL MQTT"
+                    self._merge_water(source, summary, now)
             self._data["mqtt"].update(connected=True, updated=now, error="")
