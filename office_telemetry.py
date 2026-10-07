@@ -80,6 +80,16 @@ HOUSE_TOPICS = (
     "smartthings/Patio Speakers",
 )
 
+LEAK_TOPICS = {
+    "smartthings/Upstairs Water Heater Leak",
+    "smartthings/Bar Sink Leak",
+    "smartthings/kitchen Sink Leak",
+    "smartthings/Washing Machine Water Leak Sensor",
+    "smartthings/Attic AC Overflow",
+    "smartthings/Centralite Water Leak Sensor",
+    "smartthings/Ice Maker",
+}
+
 SYSTEM_GROUPS = {
     "Back Yard": "BACK YARD",
     "Bar Front": "BAR", "Bar Overhead": "BAR", "Bar Signs": "BAR",
@@ -264,7 +274,7 @@ class TelemetryService:
             "network": {},
             "weather": {},
             "forecast": {},
-            "house": {"leaks": {}, "systems": {}},
+            "house": {"leaks": {}, "systems": {}, "batteries": {}},
             "water": {"lake": {}, "trinity": {}},
             "mqtt": {"connected": False, "updated": 0.0, "error": "STARTING"},
             "weatherflow": {"connected": False, "updated": 0.0, "error": "WAITING"},
@@ -531,7 +541,11 @@ class TelemetryService:
                                       error="" if connected else f"CONNACK {reason_code}",
                                       updated=time.time())
         if connected:
-            client.subscribe([(topic, 0) for topic in HOUSE_TOPICS])
+            # The wildcard provides a complete retained battery inventory; the
+            # explicit list remains for non-SmartThings local feeds.
+            client.subscribe("smartthings/#")
+            client.subscribe([(topic, 0) for topic in HOUSE_TOPICS
+                              if not topic.startswith("smartthings/")])
 
     def _mqtt_disconnect(self, _client, _userdata, *callback_args):
         reason_code = callback_args[-2] if len(callback_args) >= 2 else callback_args[-1] if callback_args else 0
@@ -550,6 +564,21 @@ class TelemetryService:
             payload = text_payload
         topic = message.topic
         updates = {}
+        if topic.startswith("smartthings/"):
+            name = topic.split("/", 1)[1]
+            summary = _smartthings_summary(payload)
+            if summary.get("battery") is not None:
+                battery_value, battery_stamp, battery_unit = _capability(payload, "battery")
+                updates["battery"] = (name, {
+                    "name": name,
+                    "source": "SMARTTHINGS",
+                    "level_pct": float(battery_value),
+                    "value_text": f"{float(battery_value):.0f}%",
+                    "reported_at": battery_stamp,
+                    "activity_at": summary.get("updated", 0.0),
+                    "online": summary.get("DeviceWatch-DeviceStatus"),
+                    "unit": battery_unit or "%",
+                })
         if topic == "HourlyForecast" and isinstance(payload, list) and payload:
             item = payload[0]
             updates = {"forecast": {"temperature_f": item.get("temperature"),
@@ -561,15 +590,15 @@ class TelemetryService:
             temperature, stamp, _ = _capability(payload, "temperature")
             humidity, humidity_stamp, _ = _capability(payload, "humidity")
             key = "wine_cellar" if "wine cellar" in topic else "keg"
-            updates = {"house": {key: {"temperature_f": temperature, "humidity": humidity,
-                                       "updated": max(stamp, humidity_stamp)}}}
+            updates["house"] = {key: {"temperature_f": temperature, "humidity": humidity,
+                                      "updated": max(stamp, humidity_stamp)}}
         elif topic in ("smartthings/L garage door", "smartthings/R garage door"):
             contact, stamp, _ = _capability(payload, "contact")
             key = "garage_left" if "/L garage" in topic else "garage_right"
-            updates = {"house": {key: {"state": contact, "updated": stamp}}}
-        elif "Leak" in topic or topic.endswith("Ice Maker"):
+            updates["house"] = {key: {"state": contact, "updated": stamp}}
+        elif topic in LEAK_TOPICS:
             water, stamp, _ = _capability(payload, "water")
-            updates = {"leak": (topic.split("/", 1)[-1], water, stamp)}
+            updates["leak"] = (topic.split("/", 1)[-1], water, stamp)
         if topic in ("LewisvilleLake", "TrinityRiver"):
             updates["water_source"] = ("lake" if topic == "LewisvilleLake" else "trinity",
                                        _water_summary(topic, payload, now))
@@ -586,6 +615,9 @@ class TelemetryService:
                 name, state, stamp = updates["leak"]
                 self._data["house"].setdefault("leaks", {})[name] = {
                     "state": state, "updated": stamp}
+            if "battery" in updates:
+                name, item = updates["battery"]
+                self._data["house"].setdefault("batteries", {})[name] = item
             if "system" in updates:
                 name, group, summary = updates["system"]
                 summary.update(name=name, group=group, received=now)

@@ -1,5 +1,7 @@
 import os
+import json
 import sys
+from types import SimpleNamespace
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -18,6 +20,20 @@ class LocalTelemetryParsingTests(unittest.TestCase):
         self.assertEqual(result["switch"], "on")
         self.assertEqual(result["level"], 50)
         self.assertEqual(result["level_unit"], "%")
+
+    def test_smartthings_battery_inventory_and_named_overflow_sensor(self):
+        payload = [
+            {"water": {"value": "dry", "timestamp": "2026-10-07T20:00:00Z"}},
+            {"battery": {"value": 22, "unit": "%", "timestamp": "2026-10-07T19:00:00Z"}},
+        ]
+        service = TelemetryService()
+        service._mqtt_message(None, None, SimpleNamespace(
+            topic="smartthings/Attic AC Overflow", payload=json.dumps(payload).encode()))
+        snapshot = service.snapshot()
+        self.assertEqual(snapshot["house"]["leaks"]["Attic AC Overflow"]["state"], "dry")
+        battery = snapshot["house"]["batteries"]["Attic AC Overflow"]
+        self.assertEqual(battery["level_pct"], 22)
+        self.assertEqual(battery["value_text"], "22%")
 
     def test_usgs_lake_elevation_code(self):
         payload = {"value": {"timeSeries": [{

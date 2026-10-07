@@ -104,6 +104,17 @@ shutter across the affected dial, edge meter, or readout. Valid caution and
 alarm states remain visible normally; the shutter indicates missing telemetry,
 not merely an unfavorable measurement.
 
+The `POWER CELLS` page automatically inventories every retained SmartThings
+device with a battery capability, all supported YoLink sensors, and the Tempest
+station battery voltage. It sorts critical and low cells first, distinguishes
+old/offline reports from genuinely low readings, and shows both battery-report
+age and overall device-activity age. SmartThings discovery uses the local
+`smartthings/#` MQTT tree; no cloud credentials are stored by the kiosk.
+
+`WATER RECLAMATION` monitors seven named SmartThings water sensors, including
+the Attic AC Overflow device. Its red-and-white shutter means no sufficiently
+recent dry/wet report is available; it never means that a leak was inferred.
+
 ## Ship Status selector
 
 ![Apollo-style Ship Status dashboard at 1920×1080](assets/ship-status-screenshot.png)

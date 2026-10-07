@@ -69,7 +69,7 @@ def load_console_preferences():
             mode = config.get("display_mode", "AUTO")
             page = config.get("status_page", "NETWORK")
             return (mode if mode in ("TRANSPORTER", "SHIP STATUS", "AUTO") else "AUTO",
-                    page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS") else "NETWORK")
+                    page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS", "POWER CELLS") else "NETWORK")
     except (OSError, ValueError, TypeError):
         return "AUTO", "NETWORK"
 
@@ -78,6 +78,7 @@ telemetry = TelemetryService() if TelemetryService else None
 yolink = YoLinkService() if YoLinkService else None
 environment_sensor_page = 0
 house_system_page = 0
+battery_status_page = 0
 pressure_trace = deque(maxlen=120)
 last_pressure_trace_sample = 0.0
 
@@ -737,12 +738,13 @@ def status_nav_layout(size):
     footer = pygame.Rect(r["mode_selector"].right + gap, size[1] - int(size[1] * .075),
                          size[0] - r["mode_selector"].right - gap - int(size[0] * .018),
                          int(size[1] * .052))
-    third = (footer.w - gap * 2) // 3
+    fourth = (footer.w - gap * 3) // 4
     return {
-        "NETWORK": pygame.Rect(footer.x, footer.y, third, footer.h),
-        "ENVIRONMENT": pygame.Rect(footer.x + third + gap, footer.y, third, footer.h),
-        "HOUSE SYSTEMS": pygame.Rect(footer.x + (third + gap) * 2, footer.y,
-                                     footer.w - third * 2 - gap * 2, footer.h),
+        "NETWORK": pygame.Rect(footer.x, footer.y, fourth, footer.h),
+        "ENVIRONMENT": pygame.Rect(footer.x + fourth + gap, footer.y, fourth, footer.h),
+        "HOUSE SYSTEMS": pygame.Rect(footer.x + (fourth + gap) * 2, footer.y, fourth, footer.h),
+        "POWER CELLS": pygame.Rect(footer.x + (fourth + gap) * 3, footer.y,
+                                   footer.w - fourth * 3 - gap * 3, footer.h),
     }
 
 def status_page_at_position(pos, size):
@@ -754,7 +756,8 @@ def status_page_at_position(pos, size):
 def draw_status_nav(surface):
     for page, rect in status_nav_layout(surface.get_size()).items():
         selected = status_page == page
-        color = CYAN if page == "NETWORK" else AMBER if page == "ENVIRONMENT" else GREEN
+        color = (CYAN if page == "NETWORK" else AMBER if page == "ENVIRONMENT"
+                 else GREEN if page == "HOUSE SYSTEMS" else ORANGE)
         pygame.draw.rect(surface, tuple(channel // (4 if selected else 8) for channel in color),
                          rect, border_radius=5)
         pygame.draw.rect(surface, color if selected else BEZEL, rect, 3, border_radius=5)
@@ -786,6 +789,19 @@ def house_pager_layout(size):
     return {
         "PREVIOUS": pygame.Rect(content_x + 18, y, int(w * .085), int(h * .035)),
         "NEXT": pygame.Rect(content_x + grid_w - 18 - int(w * .085), y,
+                            int(w * .085), int(h * .035)),
+    }
+
+def battery_pager_layout(size):
+    r = layout(size)
+    w, h = size
+    gap, margin = int(w * .012), int(w * .018)
+    content_x = r["mode_selector"].right + gap
+    content_w = w - margin - content_x
+    y = status_nav_layout(size)["NETWORK"].y - int(h * .047)
+    return {
+        "PREVIOUS": pygame.Rect(content_x + 18, y, int(w * .085), int(h * .035)),
+        "NEXT": pygame.Rect(content_x + content_w - 18 - int(w * .085), y,
                             int(w * .085), int(h * .035)),
     }
 
@@ -1687,6 +1703,135 @@ def draw_house_status(surface, now, data):
     txt(surface, detail, river_rect.h * .09, MUTED, (river_rect.centerx, river_rect.bottom - 17), "midbottom", True)
     draw_status_nav(surface)
 
+def battery_inventory(telemetry_data, yolink_data):
+    """Combine battery-capable sources without pretending old readings are live."""
+    items = [dict(item) for item in telemetry_data.get("house", {}).get("batteries", {}).values()]
+    for sensor in yolink_data.get("temperature_sensors", []):
+        level = sensor.get("battery")
+        if level is not None:
+            items.append({
+                "name": sensor.get("name", "YOLINK SENSOR"), "source": "YOLINK",
+                "level_pct": max(0, min(100, float(level) * 25)),
+                "value_text": f"{level}/4", "reported_at": sensor.get("reported_at"),
+                "activity_at": sensor.get("reported_at"), "online": sensor.get("online"),
+                "stale_after": 86400,
+            })
+    shed = yolink_data.get("shed", {})
+    if shed.get("battery") is not None:
+        level = shed["battery"]
+        items.append({
+            "name": "SHED DOOR", "source": "YOLINK",
+            "level_pct": max(0, min(100, float(level) * 25)),
+            "value_text": f"{level}/4", "reported_at": shed.get("reported_at"),
+            "activity_at": shed.get("reported_at"), "online": shed.get("online"),
+            "stale_after": 86400,
+        })
+    weather = telemetry_data.get("weather", {})
+    voltage = weather.get("battery_v")
+    if voltage is not None:
+        weatherflow = telemetry_data.get("weatherflow", {})
+        items.append({
+            "name": "TEMPEST STATION", "source": "WEATHERFLOW",
+            "level_pct": max(0, min(100, (float(voltage) - 2.2) / .6 * 100)),
+            "value_text": f"{float(voltage):.2f} V", "reported_at": weatherflow.get("updated"),
+            "activity_at": weatherflow.get("updated"), "online": weatherflow.get("connected"),
+            "stale_after": 600,
+        })
+
+    now = time.time()
+    for item in items:
+        activity = item.get("activity_at") or item.get("reported_at") or 0
+        stale_after = item.get("stale_after", 7 * 86400)
+        item["stale"] = not activity or now - activity > stale_after
+        item["offline"] = item.get("online") in (False, "offline")
+        level = float(item.get("level_pct") or 0)
+        item["condition"] = ("CRITICAL" if level <= 15 else "LOW" if level <= 30 else
+                             "OFFLINE" if item["offline"] else "STALE" if item["stale"] else "GOOD")
+    order = {"CRITICAL": 0, "LOW": 1, "OFFLINE": 2, "STALE": 3, "GOOD": 4}
+    return sorted(items, key=lambda item: (order[item["condition"]],
+                                           float(item.get("level_pct") or 0),
+                                           str(item.get("name", ""))))
+
+def draw_battery_card(surface, rect, item):
+    condition = item["condition"]
+    color = RED if condition in ("CRITICAL", "OFFLINE") else AMBER if condition in ("LOW", "STALE") else GREEN
+    panel(surface, rect, (8, 16, 17), BEZEL, 5)
+    pygame.draw.circle(surface, BEZEL, (rect.x + 18, rect.y + 20), 9)
+    pygame.draw.circle(surface, color, (rect.x + 18, rect.y + 20), 5)
+    display_name = str(item.get("name", "UNNAMED"))[:36].upper()
+    name_size = rect.h * (.085 if len(display_name) > 27 else .105)
+    txt(surface, display_name, name_size, CREAM,
+        (rect.x + 34, rect.y + 10), bold=True)
+    txt(surface, str(item.get("source", "UNKNOWN")), rect.h * .075, MUTED,
+        (rect.right - 12, rect.y + 12), "topright", True)
+    txt(surface, item.get("value_text", "—"), rect.h * .25, color,
+        (rect.x + 16, rect.centery), "midleft", True)
+    bar_rect = pygame.Rect(rect.x + int(rect.w * .38), rect.centery - 12,
+                           int(rect.w * .57), 24)
+    pygame.draw.rect(surface, (3, 7, 8), bar_rect)
+    segments = 10
+    active = round(max(0, min(100, float(item.get("level_pct") or 0))) / 10)
+    gap = 3
+    segment_w = (bar_rect.w - gap * (segments + 1)) / segments
+    for index in range(segments):
+        segment = pygame.Rect(round(bar_rect.x + gap + index * (segment_w + gap)),
+                              bar_rect.y + 4, max(2, round(segment_w)), bar_rect.h - 8)
+        segment_color = (RED if index < 2 else AMBER if index < 4 else GREEN)
+        pygame.draw.rect(surface, segment_color if index < active else (24, 34, 31), segment)
+    txt(surface, condition, rect.h * .085, color,
+        (rect.x + 15, rect.bottom - 13), "bottomleft", True)
+    txt(surface, f"BATTERY {compact_age(item.get('reported_at'))}  •  DEVICE {compact_age(item.get('activity_at'))}",
+        rect.h * .065, MUTED, (rect.right - 12, rect.bottom - 13), "bottomright", True)
+
+def draw_power_status(surface, now, telemetry_data, yolink_data):
+    r, w, h = layout(surface.get_size()), *surface.get_size()
+    surface.fill(BLACK)
+    panel(surface, r["header"], NAVY, CYAN)
+    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
+        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    txt(surface, "REMOTE POWER CELL STATUS", h * .047, WHITE,
+        (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
+    draw_mode_selector(surface, r["mode_selector"])
+    items = battery_inventory(telemetry_data, yolink_data)
+    fault_count = sum(item["condition"] != "GOOD" for item in items)
+    status_color = AMBER if fault_count else GREEN
+    pygame.draw.circle(surface, status_color, (r["header"].right - 38, r["header"].centery), 14)
+    txt(surface, f"{fault_count:02d} SERVICE ITEMS" if fault_count else "ALL CELLS NOMINAL",
+        h * .024, status_color, (r["header"].right - 66, r["header"].centery), "midright", True)
+
+    gap, margin = int(w * .012), int(w * .018)
+    body_y = r["header"].bottom + gap
+    nav_y = status_nav_layout(surface.get_size())["NETWORK"].y
+    content_x = r["mode_selector"].right + gap
+    content_w = w - margin - content_x
+    page_size = 12
+    page_count = max(1, math.ceil(len(items) / page_size))
+    active_page = min(battery_status_page, page_count - 1)
+    shown = items[active_page * page_size:(active_page + 1) * page_size]
+    pager = battery_pager_layout(surface.get_size())
+    grid_bottom = pager["PREVIOUS"].y - 8 if page_count > 1 else nav_y - gap
+    columns, rows, card_gap = 3, 4, 10
+    card_w = (content_w - card_gap * (columns - 1)) // columns
+    card_h = (grid_bottom - body_y - card_gap * (rows - 1)) // rows
+    if not shown:
+        txt(surface, "NO BATTERY TELEMETRY DETECTED", h * .035, AMBER,
+            (content_x + content_w // 2, (body_y + grid_bottom) // 2), "center", True)
+    for index, item in enumerate(shown):
+        col, row = index % columns, index // columns
+        draw_battery_card(surface, pygame.Rect(content_x + col * (card_w + card_gap),
+                                                body_y + row * (card_h + card_gap),
+                                                card_w, card_h), item)
+    if page_count > 1:
+        for name, rect in pager.items():
+            enabled = (name == "PREVIOUS" and active_page > 0) or (name == "NEXT" and active_page + 1 < page_count)
+            pygame.draw.rect(surface, (45, 48, 44), rect, border_radius=3)
+            pygame.draw.rect(surface, ORANGE if enabled else BEZEL, rect, 2, border_radius=3)
+            txt(surface, "◀ PREV" if name == "PREVIOUS" else "NEXT ▶", rect.h * .30,
+                CREAM if enabled else MUTED, rect.center, "center", True)
+        txt(surface, f"CELL PAGE {active_page + 1} / {page_count}  •  {len(items)} SOURCES",
+            h * .012, CREAM, ((content_x * 2 + content_w) // 2, pager["NEXT"].centery), "center", True)
+    draw_status_nav(surface)
+
 def draw_sad_mac(surface):
     """Full-screen monochrome homage to the original compact-Mac crash icon."""
     w, h = surface.get_size()
@@ -1797,7 +1942,7 @@ def draw_destruct_countdown(surface, now):
         (255, 205, 190), (instruction_x, int(h * .935)), "center", True)
 
 def handle_touch(pos, now):
-    global arm_until, shutdown_confirm_until, status_page, environment_sensor_page, house_system_page
+    global arm_until, shutdown_confirm_until, status_page, environment_sensor_page, house_system_page, battery_status_page
     if shutdown_confirm_until > now:
         controls = shutdown_layout(screen.get_size())
         if controls["confirm"].collidepoint(pos) and not shutdown_pending:
@@ -1819,6 +1964,10 @@ def handle_touch(pos, now):
                 environment_sensor_page = max(0, environment_sensor_page - 1)
                 mark_activity()
                 return
+            if pager["NEXT"].collidepoint(pos):
+                environment_sensor_page = min(page_count - 1, environment_sensor_page + 1)
+                mark_activity()
+                return
         if display_mode == "SHIP STATUS" and status_page == "HOUSE SYSTEMS":
             page_count = max(1, math.ceil(len(grouped_house_systems(
                 telemetry.snapshot() if telemetry else {})) / 6))
@@ -1831,8 +1980,17 @@ def handle_touch(pos, now):
                 house_system_page = min(page_count - 1, house_system_page + 1)
                 mark_activity()
                 return
+        if display_mode == "SHIP STATUS" and status_page == "POWER CELLS":
+            telemetry_data = telemetry.snapshot() if telemetry else {}
+            yolink_data = yolink.snapshot() if yolink else {}
+            page_count = max(1, math.ceil(len(battery_inventory(telemetry_data, yolink_data)) / 12))
+            pager = battery_pager_layout(screen.get_size())
+            if pager["PREVIOUS"].collidepoint(pos):
+                battery_status_page = max(0, battery_status_page - 1)
+                mark_activity()
+                return
             if pager["NEXT"].collidepoint(pos):
-                environment_sensor_page = min(page_count - 1, environment_sensor_page + 1)
+                battery_status_page = min(page_count - 1, battery_status_page + 1)
                 mark_activity()
                 return
         selected_page = status_page_at_position(pos, screen.get_size())
@@ -1943,6 +2101,10 @@ try:
                 draw_environment_status(screen, now, yolink.snapshot() if yolink else {})
             elif status_page == "HOUSE SYSTEMS":
                 draw_house_status(screen, now, telemetry.snapshot() if telemetry else {})
+            elif status_page == "POWER CELLS":
+                draw_power_status(screen, now,
+                                  telemetry.snapshot() if telemetry else {},
+                                  yolink.snapshot() if yolink else {})
             else:
                 draw_ship_status(screen, now, telemetry.snapshot() if telemetry else {})
         else:
