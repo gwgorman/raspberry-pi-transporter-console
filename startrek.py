@@ -419,7 +419,7 @@ def bar(surface, rect, value, color=CYAN, segments=20):
         r = pygame.Rect(round(rect.x + i * (sw + gap)), rect.y, max(2, round(sw)), rect.h)
         pygame.draw.rect(surface, color if i < active else (28, 58, 68), r, border_radius=3)
 
-def edge_meter(surface, rect, value, label, color, valid=True):
+def edge_meter(surface, rect, value, label, color, valid=True, readout_text=None):
     """Retro edgewise panel meter with a moving pointer over a fixed scale."""
     value = max(0.0, min(1.0, value))
     pygame.draw.rect(surface, (72, 77, 73), rect, border_radius=4)
@@ -432,7 +432,8 @@ def edge_meter(surface, rect, value, label, color, valid=True):
     readout = pygame.Rect(inner.right - 46, inner.y + 4, 40, 17)
     pygame.draw.rect(surface, (0, 0, 0), readout)
     pygame.draw.rect(surface, BEZEL, readout, 1)
-    txt(surface, f"{int(value * 100):02d}", rect.h * .17, CREAM, readout.center, "center", True)
+    txt(surface, readout_text if readout_text is not None else f"{int(value * 100):02d}",
+        rect.h * .17, CREAM, readout.center, "center", True)
     track = pygame.Rect(inner.x + 8, inner.bottom - 23, inner.w - 16, 17)
     pygame.draw.rect(surface, (2, 6, 7), track)
     for i in range(21):
@@ -976,6 +977,41 @@ def dual_door_card(surface, rect, left_state, right_state, valid=True):
     if not valid:
         invalid_data_flag(surface, inner)
 
+def precipitation_panel(surface, rect, rate_inh, precip_type, total_in, source,
+                        rate_valid=True, total_valid=True):
+    """Apollo-style rain rate tape, precipitation lamps, and local-day counter."""
+    gap = 8
+    rate_rect = pygame.Rect(rect.x, rect.y, int(rect.w * .54), rect.h)
+    total_rect = pygame.Rect(rate_rect.right + gap, rect.y, rect.right - rate_rect.right - gap, rect.h)
+    rate_scale = min(1.0, math.sqrt(max(0.0, rate_inh) / 2.0))
+    edge_meter(surface, rate_rect, rate_scale, "RAIN RATE IN/HR", CYAN,
+               rate_valid, f"{rate_inh:.2f}")
+
+    pygame.draw.rect(surface, (73, 78, 73), total_rect, border_radius=4)
+    pygame.draw.rect(surface, (158, 159, 145), total_rect, 2, border_radius=4)
+    inner = total_rect.inflate(-8, -8)
+    pygame.draw.rect(surface, (5, 12, 13), inner, border_radius=2)
+    txt(surface, f"LOCAL DAY ACCUM • {source}", rect.h * .14, CREAM,
+        (inner.x + 7, inner.y + 3), bold=True)
+    if total_in is None:
+        total_text = "— IN"
+    elif 0 < total_in < .005:
+        total_text = "TRACE"
+    else:
+        total_text = f"{total_in:.2f} IN"
+    txt(surface, total_text, rect.h * .27, WHITE,
+        (inner.centerx, inner.y + int(inner.h * .43)), "center", True)
+    types = ((0, "DRY"), (1, "RAIN"), (2, "HAIL"), (3, "MIX"))
+    for index, (code, label) in enumerate(types):
+        x = int(inner.x + inner.w * (.10 + index * .25))
+        color = GREEN if code == 0 else CYAN if code == 1 else AMBER if code == 2 else RED
+        pygame.draw.circle(surface, BEZEL, (x, inner.bottom - 11), 6)
+        pygame.draw.circle(surface, color if precip_type == code else (24, 28, 25),
+                           (x, inner.bottom - 11), 4)
+        txt(surface, label, rect.h * .095, MUTED, (x + 7, inner.bottom - 11), "midleft", True)
+    if not total_valid:
+        invalid_data_flag(surface, inner)
+
 def draw_ship_status(surface, now, data):
     """Apollo/steampunk telemetry panel; all data is read-only."""
     r, w, h = layout(surface.get_size()), *surface.get_size()
@@ -1036,9 +1072,7 @@ def draw_ship_status(surface, now, data):
     local_weather = bool(weather.get("temperature_c") is not None)
     air_f = (weather.get("temperature_c") * 9 / 5 + 32) if local_weather else forecast.get("temperature_f")
     weather_age = data.get("weatherflow", {}).get("updated") if local_weather else forecast.get("updated")
-    weather_source = "ATMOSPHERIC SENSOR ARRAY" if local_weather else "REMOTE FORECAST ARRAY"
     weather_valid = bool(weather_age and time.time() - weather_age < 180 and air_f is not None)
-    weather_color = GREEN if weather_valid else RED
     big_radius = int(min(center.w * .15, center.h * .14))
     dial_y = center.y + int(center.h * .25)
     gauge(surface, (center.x + int(center.w * .28), dial_y), big_radius,
@@ -1053,7 +1087,10 @@ def draw_ship_status(surface, now, data):
     meter_h = int(h * .065)
     pressure = float(weather.get("pressure_mb") or 0)
     humidity = float(weather.get("humidity") or 0)
-    rain = float(weather.get("daily_rain_mm") or weather.get("rain_mm") or 0) / 25.4
+    rain_rate_inh = float(weather.get("rain_rate_mmh") or 0) / 25.4
+    local_day_mm = weather.get("local_day_rain_mm")
+    local_day_in = float(local_day_mm) / 25.4 if local_day_mm is not None else None
+    precip_type = int(weather.get("precip_type") or 0)
     lightning_5m = int(weather.get("lightning_5m") or 0)
     lightning_km = weather.get("last_lightning_km")
     if lightning_km is None:
@@ -1089,11 +1126,13 @@ def draw_ship_status(surface, now, data):
     if not lightning_valid:
         invalid_data_flag(surface, lightning_rect)
     detail_y = lightning_rect.bottom + 10
-    age_text, _ = data_age(weather_age)
-    telemetry_card(surface, pygame.Rect(center.x + 20, detail_y, center.w - 40, card_h),
-                   weather_source,
-                   forecast.get("summary", "LOCAL OBSERVATION") if not local_weather else f"RAIN {rain:.2f} IN",
-                   age_text, weather_color, weather_valid, weather_valid)
+    cloud_age = data.get("tempest_cloud", {}).get("updated")
+    cloud_valid = bool(cloud_age and time.time() - cloud_age < 180 and local_day_in is not None)
+    precip_rect = pygame.Rect(center.x + 20, detail_y, center.w - 40, card_h)
+    precipitation_panel(surface, precip_rect, rain_rate_inh, precip_type, local_day_in,
+                        weather.get("rain_source", "TEMPEST"),
+                        weather_valid and weather.get("rain_rate_mmh") is not None,
+                        cloud_valid)
 
     panel(surface, right, PANEL, BLUE, 12)
     txt(surface, "COMMUNICATIONS", h * .025, CREAM, (right.x + 18, right.y + 14), bold=True)

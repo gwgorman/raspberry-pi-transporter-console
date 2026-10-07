@@ -4,7 +4,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from office_telemetry import TelemetryService, _smartthings_summary, _water_summary
+from office_telemetry import (TelemetryService, _smartthings_summary,
+                              _tempest_cloud_summary, _water_summary)
 
 
 class LocalTelemetryParsingTests(unittest.TestCase):
@@ -61,6 +62,22 @@ class LocalTelemetryParsingTests(unittest.TestCase):
         weather = service.snapshot()["weather"]
         self.assertEqual(weather["last_lightning_km"], 12)
         self.assertNotIn("lightning_5m", weather)
+
+    def test_tempest_cloud_daily_rain_and_rate(self):
+        observation = [1_791_394_700, 0, 0, 0, 0, 60, 997, 27, 43, 100,
+                       1, 20, .5, 1, 0, 0, 2.4, 1, 3.5, None, None, 0]
+        result = _tempest_cloud_summary({"type": "obs_st", "obs": [observation]}, 10)
+        self.assertTrue(result["valid"])
+        self.assertAlmostEqual(result["rain_rate_mmh"], 30)
+        self.assertAlmostEqual(result["local_day_rain_mm"], 3.5)
+        self.assertEqual(result["rain_source"], "TEMPEST")
+
+    def test_tempest_cloud_prefers_visible_nearcast_total(self):
+        observation = [1_791_394_700, 0, 0, 0, 0, 60, 997, 27, 43, 100,
+                       1, 20, .5, 1, 0, 0, 2.4, 1, 3.5, .6, 4.25, 1]
+        result = _tempest_cloud_summary({"type": "obs_st", "obs": [observation]}, 10)
+        self.assertAlmostEqual(result["local_day_rain_mm"], 4.25)
+        self.assertEqual(result["rain_source"], "NEARCAST")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 try:
@@ -27,6 +28,8 @@ except ImportError:
 MQTT_HOST = "snoop433.local"
 MQTT_PORT = 1883
 WEATHERFLOW_PORT = 50222
+TEMPEST_CONFIG = os.path.expanduser("~/.config/startrek-tempest.json")
+TEMPEST_REFRESH_SECONDS = 60
 USGS_REFRESH_SECONDS = 900
 USGS_URLS = {
     "lake": ("LewisvilleLake", "https://waterservices.usgs.gov/nwis/iv/"
@@ -218,6 +221,35 @@ def _water_summary(topic, payload, now):
     return result
 
 
+def _tempest_cloud_summary(payload, received):
+    """Normalize an extended cloud obs_st record without exposing credentials."""
+    observations = payload.get("obs") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict) or payload.get("type") != "obs_st" or not observations:
+        return {"valid": False, "updated": received, "error": "NO TEMPEST OBSERVATION"}
+    ob = observations[-1]
+    if len(ob) < 18:
+        return {"valid": False, "updated": received, "error": "SHORT TEMPEST OBSERVATION"}
+    interval_minutes = float(ob[17] or 1)
+    raw_interval = float(ob[12] or 0)
+    raw_day = float(ob[18]) if len(ob) > 18 and ob[18] is not None else None
+    nearcast_interval = float(ob[19]) if len(ob) > 19 and ob[19] is not None else None
+    nearcast_day = float(ob[20]) if len(ob) > 20 and ob[20] is not None else None
+    analysis_type = int(ob[21] or 0) if len(ob) > 21 else 0
+    use_nearcast = analysis_type == 1 and nearcast_day is not None
+    interval_mm = nearcast_interval if use_nearcast and nearcast_interval is not None else raw_interval
+    return {
+        "valid": True,
+        "updated": received,
+        "observed": float(ob[0]),
+        "rain_rate_mmh": interval_mm * 60 / max(1, interval_minutes),
+        "rain_interval_mm": interval_mm,
+        "precip_type": int(ob[13] or 0),
+        "local_day_rain_mm": nearcast_day if use_nearcast else raw_day,
+        "rain_source": "NEARCAST" if use_nearcast else "TEMPEST",
+        "analysis_type": analysis_type,
+    }
+
+
 class TelemetryService:
     """Collect system, WeatherFlow, and selected MQTT data off the UI thread."""
 
@@ -236,6 +268,8 @@ class TelemetryService:
             "water": {"lake": {}, "trinity": {}},
             "mqtt": {"connected": False, "updated": 0.0, "error": "STARTING"},
             "weatherflow": {"connected": False, "updated": 0.0, "error": "WAITING"},
+            "tempest_cloud": {"connected": False, "updated": 0.0,
+                              "error": "NOT CONFIGURED"},
         }
         self._threads = []
 
@@ -244,6 +278,7 @@ class TelemetryService:
             return
         for target, name in ((self._system_loop, "ship-system-telemetry"),
                              (self._weather_loop, "ship-weatherflow"),
+                             (self._tempest_cloud_loop, "ship-tempest-cloud"),
                              (self._mqtt_loop, "ship-mqtt"),
                              (self._usgs_loop, "ship-usgs-water")):
             thread = threading.Thread(target=target, name=name, daemon=True)
@@ -381,6 +416,39 @@ class TelemetryService:
                 self._merge_water(source, summary)
             self._stop.wait(USGS_REFRESH_SECONDS)
 
+    def _tempest_cloud_loop(self):
+        """Poll the authoritative cloud observation once per report interval."""
+        while not self._stop.is_set():
+            try:
+                if os.stat(TEMPEST_CONFIG).st_mode & 0o077:
+                    raise PermissionError("CONFIG FILE MUST USE MODE 0600")
+                with open(TEMPEST_CONFIG, encoding="utf-8") as stream:
+                    config = json.load(stream)
+                if not config.get("enabled") or not config.get("token") or not config.get("device_id"):
+                    raise PermissionError("TEMPEST CREDENTIALS INCOMPLETE")
+                query = urllib.parse.urlencode({"device_id": int(config["device_id"]),
+                                                "token": config["token"]})
+                request = urllib.request.Request(
+                    f"https://swd.weatherflow.com/swd/rest/observations/?{query}",
+                    headers={"User-Agent": "startrek-console/1.0"})
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    summary = _tempest_cloud_summary(json.load(response), time.time())
+                if not summary.get("valid"):
+                    raise ValueError(summary.get("error", "TEMPEST DATA INVALID"))
+                with self._lock:
+                    self._data["weather"].update(summary)
+                    self._data["tempest_cloud"].update(
+                        connected=True, updated=summary["updated"], error="",
+                        station_id=config.get("station_id"), device_id=config.get("device_id"))
+            except FileNotFoundError:
+                with self._lock:
+                    self._data["tempest_cloud"].update(connected=False, error="NOT CONFIGURED")
+            except Exception as exc:
+                with self._lock:
+                    self._data["tempest_cloud"].update(
+                        connected=False, error=type(exc).__name__)
+            self._stop.wait(TEMPEST_REFRESH_SECONDS)
+
     def _handle_weather(self, packet):
         kind, now = packet.get("type"), time.time()
         values = {}
@@ -408,6 +476,7 @@ class TelemetryService:
                     "wind_gust_mps": ob[3], "wind_direction": ob[4], "pressure_mb": ob[6],
                     "temperature_c": ob[7], "humidity": ob[8], "illuminance": ob[9],
                     "uv": ob[10], "solar_wm2": ob[11], "rain_mm": ob[12],
+                    "rain_rate_mmh": float(ob[12] or 0) * 60 / max(1, float(ob[17] or 1)),
                     "precip_type": ob[13], "lightning_km": ob[14],
                     "lightning_count": strike_count, "lightning_5m": lightning_5m,
                     "lightning_5m_km": (sum(recent_distances) / len(recent_distances)

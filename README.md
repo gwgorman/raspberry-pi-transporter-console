@@ -69,15 +69,28 @@ sudo apt install python3-pygame python3-rpi.gpio python3-psutil python3-paho-mqt
 The volume control also requires `wpctl`, supplied by the Raspberry Pi OS
 `wireplumber` package.
 
-Install `office_telemetry.py` beside `startrek.py`. Ship Status reads only local
-data: Pi health, `wlan0` and `eth0`, WeatherFlow UDP broadcasts on port 50222,
-and selected MQTT topics from `snoop433.local:1883`. It does not publish MQTT
-messages or require cloud credentials.
+Install `office_telemetry.py` beside `startrek.py`. Ship Status reads Pi health,
+`wlan0` and `eth0`, WeatherFlow UDP broadcasts on port 50222, selected MQTT
+topics from `snoop433.local:1883`, and the configured Tempest cloud observation.
+It does not publish MQTT messages or control any device.
+
+Tempest's extended cloud observation supplies the service-reported
+midnight-to-midnight `LOCAL DAY ACCUM` value and RainCheck/Nearcast selection.
+Copy `startrek-tempest.example.json` privately to
+`~/.config/startrek-tempest.json`, protect it with mode `0600`, and add the
+personal access token plus station/device IDs. The token is never logged or
+stored in the repository. Local UDP remains the immediate source for rain rate,
+precipitation type, wind, lightning, and other live weather fields.
 
 The WeatherFlow panel includes a rolling five-minute lightning count built from
 the station's one-minute `obs_st` intervals, plus the last or recent average
 strike distance in miles. `evt_strike` updates distance immediately without
 also incrementing the observation count, preventing duplicate strikes.
+
+The precipitation module uses an edgewise tape for rain rate in inches/hour,
+four bezel lamps for DRY/RAIN/HAIL/MIX, and a mechanical-style `LOCAL DAY ACCUM`
+counter. The service-provided value resets at local midnight; `TRACE` is shown
+for a nonzero amount that would otherwise round to `0.00 IN`.
 
 Stale or invalid instrument inputs deploy a red-and-white striped `INVALID`
 shutter across the affected dial, edge meter, or readout. Valid caution and
