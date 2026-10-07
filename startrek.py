@@ -954,6 +954,28 @@ def telemetry_card(surface, rect, label, value, detail="", color=GREEN, state=Tr
     if not valid:
         invalid_data_flag(surface, inner)
 
+def dual_door_card(surface, rect, left_state, right_state, valid=True):
+    """Two independent, bezel-mounted shuttle-bay door indicators."""
+    pygame.draw.rect(surface, (73, 78, 73), rect, border_radius=4)
+    pygame.draw.rect(surface, (158, 159, 145), rect, 2, border_radius=4)
+    inner = rect.inflate(-8, -8)
+    pygame.draw.rect(surface, (5, 12, 13), inner, border_radius=2)
+    txt(surface, "SHUTTLE BAY DOORS", rect.h * .18, CREAM,
+        (inner.x + 8, inner.y + 4), bold=True)
+    for position, label, state in ((.25, "LEFT", left_state), (.72, "RIGHT", right_state)):
+        state_text = str(state or "UNKNOWN").upper()
+        color = GREEN if state_text == "CLOSED" else AMBER if state_text == "OPEN" else RED
+        center = (int(inner.x + inner.w * position), int(inner.y + inner.h * .66))
+        pygame.draw.circle(surface, BEZEL, center, 10)
+        pygame.draw.circle(surface, (28, 31, 28), center, 7)
+        pygame.draw.circle(surface, color, center, 6)
+        pygame.draw.circle(surface, tuple(min(255, channel + 65) for channel in color),
+                           (center[0] - 2, center[1] - 2), 2)
+        txt(surface, f"{label} {state_text}", rect.h * .22, WHITE,
+            (center[0] + 16, center[1]), "midleft", True)
+    if not valid:
+        invalid_data_flag(surface, inner)
+
 def draw_ship_status(surface, now, data):
     """Apollo/steampunk telemetry panel; all data is read-only."""
     r, w, h = layout(surface.get_size()), *surface.get_size()
@@ -1107,13 +1129,10 @@ def draw_ship_status(surface, now, data):
     right_door_data = house.get("garage_right", {})
     left_door = left_door_data.get("state", "—")
     right_door = right_door_data.get("state", "—")
-    doors_safe = left_door == right_door == "closed"
     doors_valid = all(item.get("updated") and time.time() - item["updated"] < 86400
                       for item in (left_door_data, right_door_data))
-    telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
-                   "SHUTTLE BAY DOORS", f"L {str(left_door).upper()}   R {str(right_door).upper()}",
-                   "SECURED" if doors_safe else "CHECK BAY", GREEN if doors_safe else AMBER,
-                   doors_safe, doors_valid)
+    dual_door_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
+                   left_door, right_door, doors_valid)
     aux_y += small_h + 7
     leaks = house.get("leaks", {})
     current_items = [item for item in leaks.values()
