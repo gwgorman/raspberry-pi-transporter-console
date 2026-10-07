@@ -86,8 +86,10 @@ The WeatherFlow panel includes a rolling five-minute lightning count built from
 the station's one-minute `obs_st` intervals, plus the last or recent average
 strike distance in miles. `evt_strike` updates distance immediately without
 also incrementing the observation count, preventing duplicate strikes.
+Any strike within 0.5 mile records a dedicated close-strike event and deploys
+an amber warning cover for 30 minutes showing its distance and elapsed time.
 
-The precipitation module uses an edgewise tape for rain rate in inches/hour,
+The enlarged precipitation module uses an edgewise tape for rain rate in inches/hour,
 four bezel lamps for DRY/RAIN/HAIL/MIX, and a compact analog `LOCAL DAY ACCUM`
 dial. Network cards likewise use separate logarithmic RX/TX bit-rate dials so
 quiet traffic and bursts both remain visible. The service-provided rain value resets at local midnight; `TRACE` is shown

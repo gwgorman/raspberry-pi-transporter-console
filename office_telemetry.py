@@ -484,11 +484,17 @@ class TelemetryService:
                     "battery_v": ob[16], "station_serial": packet.get("serial_number"),
                     "hub_serial": packet.get("hub_sn"),
                 }
+                if strike_distance is not None and strike_distance <= 0.804672:
+                    values.update(last_close_lightning=observed,
+                                  last_close_lightning_km=strike_distance)
                 if len(ob) > 18:
                     values["daily_rain_mm"] = ob[18]
         elif kind == "evt_strike" and len(packet.get("evt", ())) >= 2:
             values = {"last_lightning": packet["evt"][0],
                       "last_lightning_km": packet["evt"][1]}
+            if float(packet["evt"][1]) <= 0.804672:
+                values.update(last_close_lightning=packet["evt"][0],
+                              last_close_lightning_km=packet["evt"][1])
         elif kind == "evt_precip":
             values = {"precip_active": True, "last_precip": packet.get("evt", [now])[0]}
         if values:

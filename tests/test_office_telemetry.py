@@ -63,6 +63,13 @@ class LocalTelemetryParsingTests(unittest.TestCase):
         self.assertEqual(weather["last_lightning_km"], 12)
         self.assertNotIn("lightning_5m", weather)
 
+    def test_tempest_close_strike_records_warning_timestamp_and_distance(self):
+        service = TelemetryService()
+        service._handle_weather({"type": "evt_strike", "evt": [1_791_394_700, 0.5, 500]})
+        weather = service.snapshot()["weather"]
+        self.assertEqual(weather["last_close_lightning"], 1_791_394_700)
+        self.assertEqual(weather["last_close_lightning_km"], 0.5)
+
     def test_tempest_cloud_daily_rain_and_rate(self):
         observation = [1_791_394_700, 0, 0, 0, 0, 60, 997, 27, 43, 100,
                        1, 20, .5, 1, 0, 0, 2.4, 1, 3.5, None, None, 0]

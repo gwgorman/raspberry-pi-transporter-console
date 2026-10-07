@@ -511,6 +511,31 @@ def pressure_pen_tape(surface, rect, pressure_mb, valid=True):
     if not valid:
         invalid_data_flag(surface, inner)
 
+def lightning_warning_cover(surface, rect, distance_miles, age_seconds):
+    """Hinged-looking amber cover for a dangerously close recent strike."""
+    cover = rect.inflate(-4, -4)
+    pygame.draw.rect(surface, (231, 174, 38), cover, border_radius=3)
+    pygame.draw.rect(surface, (61, 49, 18), cover, 4, border_radius=3)
+    for x in range(cover.x + 9, cover.right - 8, 34):
+        pygame.draw.line(surface, (91, 70, 20), (x, cover.y + 4),
+                         (x + 18, cover.y + 4), 3)
+        pygame.draw.line(surface, (91, 70, 20), (x, cover.bottom - 5),
+                         (x + 18, cover.bottom - 5), 3)
+    for corner in ((cover.x + 11, cover.y + 11), (cover.right - 11, cover.y + 11),
+                   (cover.x + 11, cover.bottom - 11), (cover.right - 11, cover.bottom - 11)):
+        pygame.draw.circle(surface, (72, 67, 51), corner, 5)
+        pygame.draw.line(surface, (28, 28, 25), (corner[0] - 3, corner[1]),
+                         (corner[0] + 3, corner[1]), 1)
+    age_seconds = max(0, int(age_seconds))
+    age_text = (f"{age_seconds // 60:02d}M {age_seconds % 60:02d}S AGO"
+                if age_seconds < 3600 else f"{age_seconds // 3600:02d}H AGO")
+    txt(surface, "CLOSE STRIKE WARNING", cover.h * .20, (35, 30, 15),
+        (cover.centerx, cover.y + 9), "midtop", True)
+    txt(surface, f"{distance_miles:.2f} MI", cover.h * .34, (35, 30, 15),
+        (cover.centerx, cover.centery + 3), "center", True)
+    txt(surface, f"LAST CLOSE STRIKE • {age_text}", cover.h * .13, (35, 30, 15),
+        (cover.centerx, cover.bottom - 8), "midbottom", True)
+
 def tape_meter(surface, rect, value, vertical=False, accent=AMBER, background=INSTRUMENT):
     """Apollo-style moving-tape instrument with a fixed datum pointer."""
     pygame.draw.rect(surface, BEZEL, rect, border_radius=3)
@@ -1230,7 +1255,7 @@ def draw_ship_status(surface, now, data):
                humidity / 100, "ATMOSPHERIC HUMIDITY", CYAN,
                weather_valid and weather.get("humidity") is not None)
     lightning_y = meter_y + (meter_h + 10) * 2 + 10
-    lightning_rect = pygame.Rect(center.x + 20, lightning_y, center.w - 40, int(h * .115))
+    lightning_rect = pygame.Rect(center.x + 20, lightning_y, center.w - 40, int(h * .092))
     lightning_color = RED if lightning_5m else CYAN
     panel(surface, lightning_rect, (5, 12, 13), lightning_color, 5)
     pygame.draw.circle(surface, BEZEL, (lightning_rect.x + 20, lightning_rect.y + 22), 10)
@@ -1252,10 +1277,16 @@ def draw_ship_status(surface, now, data):
     lightning_valid = weather_valid and "lightning_5m" in weather
     if not lightning_valid:
         invalid_data_flag(surface, lightning_rect)
-    detail_y = lightning_rect.bottom + 10
+    close_timestamp = weather.get("last_close_lightning")
+    close_km = weather.get("last_close_lightning_km")
+    close_age = time.time() - float(close_timestamp) if close_timestamp is not None else None
+    if (lightning_valid and close_km is not None and close_age is not None and
+            0 <= close_age <= 1800 and float(close_km) <= 0.804672):
+        lightning_warning_cover(surface, lightning_rect, float(close_km) * .621371, close_age)
+    detail_y = lightning_rect.bottom + 8
     cloud_age = data.get("tempest_cloud", {}).get("updated")
     cloud_valid = bool(cloud_age and time.time() - cloud_age < 180 and local_day_in is not None)
-    precip_rect = pygame.Rect(center.x + 20, detail_y, center.w - 40, card_h)
+    precip_rect = pygame.Rect(center.x + 20, detail_y, center.w - 40, int(h * .105))
     precipitation_panel(surface, precip_rect, rain_rate_inh, precip_type, local_day_in,
                         weather.get("rain_source", "TEMPEST"),
                         weather_valid and weather.get("rain_rate_mmh") is not None,
