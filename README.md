@@ -69,7 +69,8 @@ sudo apt install python3-pygame python3-rpi.gpio python3-psutil python3-paho-mqt
 The volume control also requires `wpctl`, supplied by the Raspberry Pi OS
 `wireplumber` package.
 
-Install `office_telemetry.py` beside `startrek.py`. Ship Status reads Pi health,
+Install `office_telemetry.py`, `yolink_telemetry.py`, and `flight_telemetry.py`
+beside `startrek.py`. Ship Status reads Pi health,
 `wlan0` and `eth0`, WeatherFlow UDP broadcasts on port 50222, selected MQTT
 topics from `snoop433.local:1883`, and the configured Tempest cloud observation.
 It does not publish MQTT messages or control any device.
@@ -114,6 +115,15 @@ age and overall device-activity age. SmartThings discovery uses the local
 `WATER RECLAMATION` monitors seven named SmartThings water sensors, including
 the Attic AC Overflow device. Its red-and-white shutter means no sufficiently
 recent dry/wet report is available; it never means that a leak was inferred.
+
+The `AIR TRAFFIC` page reads the local PiAware/SkyAware receiver at
+`piawareoutside2.local` once per second. It presents a north-up 20/40/80/160 NM
+scope, short aircraft trails, altitude-coded targets, selectable targets, and
+nearest-aircraft flight strips with callsign/ICAO, locally resolved type,
+altitude trend, groundspeed, track, range, and report age. Emergency squawks
+deploy a high-visibility warning plate. The optional `WX OVERLAY` uses the same
+Iowa State Mesonet NEXRAD tiles configured by SkyAware, refreshes no more than
+once every five minutes, and fails independently of aircraft surveillance.
 
 ## Ship Status selector
 
@@ -209,8 +219,8 @@ are labeled reference marks, not invented warning bands. Failed responses are
 shown as `DATA LINK FAULT`; a previously valid measurement remains explicitly
 qualified as `LAST VALID` rather than being replaced with zero.
 
-Copy `startrek.py`, `office_telemetry.py`, `yolink_telemetry.py`, and your audio
-files into one directory, then run:
+Copy `startrek.py`, `office_telemetry.py`, `yolink_telemetry.py`,
+`flight_telemetry.py`, and your audio files into one directory, then run:
 
 ```bash
 python3 startrek.py --test

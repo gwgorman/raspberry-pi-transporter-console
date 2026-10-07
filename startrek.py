@@ -2,6 +2,7 @@
 """Touch-first Star Trek transporter kiosk for Raspberry Pi."""
 
 import math
+import io
 import os
 import re
 import subprocess
@@ -21,6 +22,11 @@ try:
     from yolink_telemetry import YoLinkService
 except ImportError:
     YoLinkService = None
+
+try:
+    from flight_telemetry import FlightTelemetryService
+except ImportError:
+    FlightTelemetryService = None
 
 try:
     import RPi.GPIO as GPIO
@@ -69,16 +75,22 @@ def load_console_preferences():
             mode = config.get("display_mode", "AUTO")
             page = config.get("status_page", "NETWORK")
             return (mode if mode in ("TRANSPORTER", "SHIP STATUS", "AUTO") else "AUTO",
-                    page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS", "POWER CELLS") else "NETWORK")
+                    page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS", "POWER CELLS", "AIR TRAFFIC") else "NETWORK")
     except (OSError, ValueError, TypeError):
         return "AUTO", "NETWORK"
 
 display_mode, status_page = load_console_preferences()
 telemetry = TelemetryService() if TelemetryService else None
 yolink = YoLinkService() if YoLinkService else None
+flight_telemetry = FlightTelemetryService() if FlightTelemetryService else None
 environment_sensor_page = 0
 house_system_page = 0
 battery_status_page = 0
+radar_range_nm = 80
+radar_weather_enabled = False
+selected_aircraft = None
+weather_tile_cache = {}
+radar_target_hitboxes = {}
 pressure_trace = deque(maxlen=120)
 last_pressure_trace_sample = 0.0
 
@@ -738,13 +750,14 @@ def status_nav_layout(size):
     footer = pygame.Rect(r["mode_selector"].right + gap, size[1] - int(size[1] * .075),
                          size[0] - r["mode_selector"].right - gap - int(size[0] * .018),
                          int(size[1] * .052))
-    fourth = (footer.w - gap * 3) // 4
+    fifth = (footer.w - gap * 4) // 5
     return {
-        "NETWORK": pygame.Rect(footer.x, footer.y, fourth, footer.h),
-        "ENVIRONMENT": pygame.Rect(footer.x + fourth + gap, footer.y, fourth, footer.h),
-        "HOUSE SYSTEMS": pygame.Rect(footer.x + (fourth + gap) * 2, footer.y, fourth, footer.h),
-        "POWER CELLS": pygame.Rect(footer.x + (fourth + gap) * 3, footer.y,
-                                   footer.w - fourth * 3 - gap * 3, footer.h),
+        "NETWORK": pygame.Rect(footer.x, footer.y, fifth, footer.h),
+        "ENVIRONMENT": pygame.Rect(footer.x + fifth + gap, footer.y, fifth, footer.h),
+        "HOUSE SYSTEMS": pygame.Rect(footer.x + (fifth + gap) * 2, footer.y, fifth, footer.h),
+        "POWER CELLS": pygame.Rect(footer.x + (fifth + gap) * 3, footer.y, fifth, footer.h),
+        "AIR TRAFFIC": pygame.Rect(footer.x + (fifth + gap) * 4, footer.y,
+                                   footer.w - fifth * 4 - gap * 4, footer.h),
     }
 
 def status_page_at_position(pos, size):
@@ -757,7 +770,8 @@ def draw_status_nav(surface):
     for page, rect in status_nav_layout(surface.get_size()).items():
         selected = status_page == page
         color = (CYAN if page == "NETWORK" else AMBER if page == "ENVIRONMENT"
-                 else GREEN if page == "HOUSE SYSTEMS" else ORANGE)
+                 else GREEN if page == "HOUSE SYSTEMS" else ORANGE if page == "POWER CELLS"
+                 else BLUE)
         pygame.draw.rect(surface, tuple(channel // (4 if selected else 8) for channel in color),
                          rect, border_radius=5)
         pygame.draw.rect(surface, color if selected else BEZEL, rect, 3, border_radius=5)
@@ -804,6 +818,23 @@ def battery_pager_layout(size):
         "NEXT": pygame.Rect(content_x + content_w - 18 - int(w * .085), y,
                             int(w * .085), int(h * .035)),
     }
+
+def radar_controls_layout(size):
+    r = layout(size)
+    w, h = size
+    gap, margin = int(w * .012), int(w * .018)
+    content_x = r["mode_selector"].right + gap
+    content_w = w - margin - content_x
+    left_w = int(content_w * .65)
+    y = r["header"].bottom + gap + 10
+    button_w, button_h = int(w * .052), int(h * .035)
+    controls = {}
+    for index, value in enumerate((20, 40, 80, 160)):
+        controls[value] = pygame.Rect(content_x + 18 + index * (button_w + 7), y,
+                                      button_w, button_h)
+    controls["WX"] = pygame.Rect(content_x + left_w - int(w * .115), y,
+                                 int(w * .10), button_h)
+    return controls
 
 def shutdown_layout(size):
     w, h = size
@@ -1832,6 +1863,222 @@ def draw_power_status(surface, now, telemetry_data, yolink_data):
             h * .012, CREAM, ((content_x * 2 + content_w) // 2, pager["NEXT"].centery), "center", True)
     draw_status_nav(surface)
 
+def flight_offset_nm(item, receiver):
+    if item.get("lat") is None or item.get("lon") is None:
+        return None
+    latitude = float(receiver.get("lat", 0))
+    dx = (float(item["lon"]) - float(receiver.get("lon", 0))) * 60 * math.cos(math.radians(latitude))
+    dy = (float(item["lat"]) - latitude) * 60
+    return dx, dy, math.hypot(dx, dy)
+
+def _world_pixel(lat, lon, zoom):
+    scale = 256 * 2 ** zoom
+    latitude = math.radians(max(-85.0511, min(85.0511, lat)))
+    return ((lon + 180) / 360 * scale,
+            (1 - math.asinh(math.tan(latitude)) / math.pi) / 2 * scale)
+
+def draw_nexrad_layer(surface, center, radius, range_nm, receiver, weather):
+    if not weather.get("tiles"):
+        return
+    zoom = int(weather.get("zoom", 7))
+    station_x, station_y = _world_pixel(float(receiver["lat"]), float(receiver["lon"]), zoom)
+    world_pixels_per_nm = (256 * 2 ** zoom) / (360 * 60 * math.cos(math.radians(float(receiver["lat"]))))
+    image_scale = (radius / range_nm) / world_pixels_per_nm
+    diameter = radius * 2
+    layer = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
+    for (tile_x, tile_y), payload in weather.get("tiles", {}).items():
+        cache_key = (zoom, tile_x, tile_y, hash(payload))
+        tile = weather_tile_cache.get(cache_key)
+        if tile is None:
+            try:
+                tile = pygame.image.load(io.BytesIO(payload)).convert_alpha()
+                weather_tile_cache[cache_key] = tile
+            except pygame.error:
+                continue
+        tile_size = max(1, round(256 * image_scale))
+        scaled = pygame.transform.smoothscale(tile, (tile_size, tile_size))
+        scaled.set_alpha(150)
+        x = radius + ((tile_x * 256) - station_x) * image_scale
+        y = radius + ((tile_y * 256) - station_y) * image_scale
+        layer.blit(scaled, (round(x), round(y)))
+    mask = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
+    pygame.draw.circle(mask, (255, 255, 255, 255), (radius, radius), radius)
+    layer.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    surface.blit(layer, (center[0] - radius, center[1] - radius))
+
+def draw_aircraft_symbol(surface, point, heading, color, selected=False):
+    angle = math.radians(float(heading or 0) - 90)
+    size = 11 if selected else 8
+    shape = []
+    for dx, dy in ((size, 0), (-size * .65, -size * .55), (-size * .35, 0),
+                   (-size * .65, size * .55)):
+        shape.append((point[0] + dx * math.cos(angle) - dy * math.sin(angle),
+                      point[1] + dx * math.sin(angle) + dy * math.cos(angle)))
+    pygame.draw.polygon(surface, color, shape)
+    if selected:
+        pygame.draw.circle(surface, WHITE, point, size + 6, 2)
+
+def draw_flight_strip(surface, rect, item, selected=False):
+    emergency = item.get("emergency") not in (None, "none") or item.get("squawk") in ("7500", "7600", "7700")
+    border = RED if emergency else WHITE if selected else BEZEL
+    panel(surface, rect, (6, 13, 15), border, 4)
+    callsign = str(item.get("flight") or item.get("registration") or item.get("hex", "UNKNOWN")).strip().upper()
+    aircraft_type = item.get("type") or item.get("category") or "—"
+    altitude = item.get("alt_baro")
+    vertical = float(item.get("baro_rate") or item.get("geom_rate") or 0)
+    trend = "↑" if vertical > 256 else "↓" if vertical < -256 else "→"
+    txt(surface, callsign, rect.h * .20, RED if emergency else CREAM,
+        (rect.x + 12, rect.y + 8), bold=True)
+    txt(surface, f"{aircraft_type}  •  {str(item.get('hex', '')).upper()}", rect.h * .105, MUTED,
+        (rect.right - 10, rect.y + 10), "topright", True)
+    alt_text = "GROUND" if altitude == "ground" else f"{int(altitude):,} FT" if altitude is not None else "ALT —"
+    txt(surface, f"{alt_text} {trend}", rect.h * .17, WHITE,
+        (rect.x + 12, rect.centery + 6), "midleft", True)
+    txt(surface, f"GS {float(item.get('gs') or 0):.0f} KT  •  HDG {float(item.get('track') or item.get('mag_heading') or 0):03.0f}°",
+        rect.h * .11, CYAN, (rect.right - 10, rect.centery + 7), "midright", True)
+    txt(surface, f"RNG {item.get('range_nm', 0):.1f} NM  •  {compact_age(time.time() - float(item.get('seen') or 0))}",
+        rect.h * .09, MUTED, (rect.x + 12, rect.bottom - 7), "bottomleft", True)
+
+def draw_air_traffic_status(surface, now, data):
+    global radar_target_hitboxes
+    r, w, h = layout(surface.get_size()), *surface.get_size()
+    surface.fill(BLACK)
+    panel(surface, r["header"], NAVY, CYAN)
+    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
+        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    txt(surface, "LOCAL AIRSPACE SURVEILLANCE", h * .047, WHITE,
+        (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
+    draw_mode_selector(surface, r["mode_selector"])
+    connected = bool(data.get("connected")) and time.time() - data.get("updated", 0) < 15
+    link_color = GREEN if connected else RED
+    pygame.draw.circle(surface, link_color, (r["header"].right - 38, r["header"].centery), 14)
+    txt(surface, "PIAWARE LINK NOMINAL" if connected else "PIAWARE LINK FAULT", h * .023, link_color,
+        (r["header"].right - 66, r["header"].centery), "midright", True)
+
+    gap, margin = int(w * .012), int(w * .018)
+    body_y = r["header"].bottom + gap
+    nav_y = status_nav_layout(surface.get_size())["NETWORK"].y
+    content_x = r["mode_selector"].right + gap
+    content_w = w - margin - content_x
+    left_w = int(content_w * .65)
+    scope_panel = pygame.Rect(content_x, body_y, left_w, nav_y - body_y - gap)
+    strip_panel = pygame.Rect(scope_panel.right + gap, body_y,
+                              content_x + content_w - scope_panel.right - gap, scope_panel.h)
+    panel(surface, scope_panel, PANEL, BLUE, 10)
+    panel(surface, strip_panel, PANEL, BLUE, 10)
+    txt(surface, "ADS-B / MLAT PLAN POSITION INDICATOR", h * .018, CREAM,
+        (scope_panel.centerx, scope_panel.y + 13), "midtop", True)
+    txt(surface, "ACTIVE FLIGHT STRIPS", h * .022, CREAM,
+        (strip_panel.x + 16, strip_panel.y + 12), bold=True)
+
+    controls = radar_controls_layout(surface.get_size())
+    for value in (20, 40, 80, 160):
+        rect = controls[value]
+        selected = radar_range_nm == value
+        pygame.draw.rect(surface, (61, 65, 58), rect, border_radius=3)
+        pygame.draw.rect(surface, AMBER if selected else BEZEL, rect, 2, border_radius=3)
+        txt(surface, f"{value} NM", rect.h * .30, CREAM if selected else MUTED,
+            rect.center, "center", True)
+    wx = controls["WX"]
+    weather = data.get("weather", {})
+    wx_color = GREEN if radar_weather_enabled and weather.get("tiles") else AMBER if radar_weather_enabled else BEZEL
+    pygame.draw.rect(surface, (47, 51, 46), wx, border_radius=3)
+    pygame.draw.rect(surface, wx_color, wx, 2, border_radius=3)
+    txt(surface, "WX OVERLAY ON" if radar_weather_enabled else "WX OVERLAY OFF", wx.h * .29,
+        CREAM if radar_weather_enabled else MUTED, wx.center, "center", True)
+
+    receiver = data.get("receiver", {})
+    center = (scope_panel.x + int(scope_panel.w * .49), scope_panel.y + int(scope_panel.h * .58))
+    radius = int(min(scope_panel.w * .35, scope_panel.h * .40))
+    pygame.draw.circle(surface, (3, 12, 12), center, radius)
+    if radar_weather_enabled and receiver.get("lat") is not None:
+        draw_nexrad_layer(surface, center, radius, radar_range_nm, receiver, weather)
+    for ring in range(1, 5):
+        ring_radius = radius * ring // 4
+        pygame.draw.circle(surface, (31, 92, 74), center, ring_radius, 1 if ring < 4 else 2)
+        txt(surface, f"{radar_range_nm * ring // 4}", h * .011, MUTED,
+            (center[0] + 5, center[1] - ring_radius + 3), "topleft", True)
+    pygame.draw.line(surface, (31, 92, 74), (center[0] - radius, center[1]),
+                     (center[0] + radius, center[1]), 1)
+    pygame.draw.line(surface, (31, 92, 74), (center[0], center[1] - radius),
+                     (center[0], center[1] + radius), 1)
+    for degrees, label in ((0, "N"), (90, "E"), (180, "S"), (270, "W")):
+        angle = math.radians(degrees - 90)
+        point = (center[0] + math.cos(angle) * (radius + 14),
+                 center[1] + math.sin(angle) * (radius + 14))
+        txt(surface, label, h * .014, CREAM, point, "center", True)
+    sweep_angle = (now * .38) % (math.pi * 2) - math.pi / 2
+    sweep_end = (center[0] + math.cos(sweep_angle) * radius,
+                 center[1] + math.sin(sweep_angle) * radius)
+    pygame.draw.line(surface, (49, 157, 91), center, sweep_end, 2)
+
+    plotted = []
+    radar_target_hitboxes = {}
+    if receiver.get("lat") is not None and receiver.get("lon") is not None:
+        for item in data.get("aircraft", []):
+            offset = flight_offset_nm(item, receiver)
+            if offset is None or float(item.get("seen_pos") or item.get("seen") or 999) > 60:
+                continue
+            dx, dy, distance = offset
+            enriched = dict(item, range_nm=distance)
+            plotted.append(enriched)
+            if distance > radar_range_nm:
+                continue
+            point = (round(center[0] + dx / radar_range_nm * radius),
+                     round(center[1] - dy / radar_range_nm * radius))
+            altitude = item.get("alt_baro")
+            altitude_num = float(altitude) if isinstance(altitude, (int, float)) else 0
+            color = GREEN if altitude_num < 5000 else AMBER if altitude_num < 18000 else CYAN
+            selected = item.get("hex") == selected_aircraft
+            trail_points = []
+            for lat, lon, _stamp in item.get("trail", []):
+                tdx = (lon - float(receiver["lon"])) * 60 * math.cos(math.radians(float(receiver["lat"])))
+                tdy = (lat - float(receiver["lat"])) * 60
+                trail_points.append((round(center[0] + tdx / radar_range_nm * radius),
+                                     round(center[1] - tdy / radar_range_nm * radius)))
+            if len(trail_points) > 1:
+                pygame.draw.lines(surface, tuple(channel // 2 for channel in color), False, trail_points, 1)
+            draw_aircraft_symbol(surface, point, item.get("track") or item.get("mag_heading"), color, selected)
+            radar_target_hitboxes[item.get("hex")] = pygame.Rect(point[0] - 14, point[1] - 14, 28, 28)
+            callsign = str(item.get("flight") or item.get("registration") or "").strip()
+            if callsign and (selected or distance < radar_range_nm * .22):
+                txt(surface, callsign, h * .010, color, (point[0] + 10, point[1] - 10), bold=True)
+    pygame.draw.circle(surface, WHITE, center, 5)
+    txt(surface, "RX", h * .010, WHITE, (center[0] + 8, center[1] + 5), bold=True)
+
+    plotted.sort(key=lambda item: (item.get("hex") != selected_aircraft, item.get("range_nm", 9999)))
+    strips = plotted[:8]
+    strip_top = strip_panel.y + 49
+    strip_gap = 7
+    strip_h = (strip_panel.bottom - strip_top - 16 - strip_gap * 7) // 8
+    for index, item in enumerate(strips):
+        rect = pygame.Rect(strip_panel.x + 12, strip_top + index * (strip_h + strip_gap),
+                           strip_panel.w - 24, strip_h)
+        draw_flight_strip(surface, rect, item, item.get("hex") == selected_aircraft)
+        radar_target_hitboxes[f"strip:{item.get('hex')}"] = rect
+    if not strips:
+        txt(surface, "NO POSITIONED AIRCRAFT", h * .025, AMBER, strip_panel.center, "center", True)
+
+    status = data.get("status", {})
+    footer_text = (f"TRACKS {len(plotted):03d}  •  RADIO {str((status.get('radio') or {}).get('status', '—')).upper()}"
+                   f"  •  MLAT {str((status.get('mlat') or {}).get('status', '—')).upper()}"
+                   f"  •  FEED {compact_age(data.get('updated'))}")
+    txt(surface, footer_text, h * .012, GREEN if connected else RED,
+        (scope_panel.centerx, scope_panel.bottom - 10), "midbottom", True)
+    if radar_weather_enabled and weather.get("error"):
+        txt(surface, "WX LINK FAULT", h * .012, AMBER,
+            (scope_panel.right - 16, scope_panel.bottom - 10), "bottomright", True)
+    emergencies = [item for item in plotted if item.get("emergency") not in (None, "none") or
+                   item.get("squawk") in ("7500", "7600", "7700")]
+    if emergencies:
+        warning = pygame.Rect(scope_panel.x + 22, scope_panel.bottom - 78, scope_panel.w - 44, 48)
+        pygame.draw.rect(surface, RED, warning, border_radius=4)
+        pygame.draw.rect(surface, CREAM, warning, 3, border_radius=4)
+        target = emergencies[0]
+        txt(surface, f"AIRSPACE EMERGENCY • {str(target.get('flight') or target.get('hex')).strip()} • SQUAWK {target.get('squawk', '—')}",
+            warning.h * .31, WHITE, warning.center, "center", True)
+    draw_status_nav(surface)
+
 def draw_sad_mac(surface):
     """Full-screen monochrome homage to the original compact-Mac crash icon."""
     w, h = surface.get_size()
@@ -1943,6 +2190,7 @@ def draw_destruct_countdown(surface, now):
 
 def handle_touch(pos, now):
     global arm_until, shutdown_confirm_until, status_page, environment_sensor_page, house_system_page, battery_status_page
+    global radar_range_nm, radar_weather_enabled, selected_aircraft
     if shutdown_confirm_until > now:
         controls = shutdown_layout(screen.get_size())
         if controls["confirm"].collidepoint(pos) and not shutdown_pending:
@@ -1993,6 +2241,24 @@ def handle_touch(pos, now):
                 battery_status_page = min(page_count - 1, battery_status_page + 1)
                 mark_activity()
                 return
+        if display_mode == "SHIP STATUS" and status_page == "AIR TRAFFIC":
+            controls = radar_controls_layout(screen.get_size())
+            for value in (20, 40, 80, 160):
+                if controls[value].collidepoint(pos):
+                    radar_range_nm = value
+                    mark_activity()
+                    return
+            if controls["WX"].collidepoint(pos):
+                radar_weather_enabled = not radar_weather_enabled
+                if flight_telemetry:
+                    flight_telemetry.set_weather_enabled(radar_weather_enabled)
+                mark_activity()
+                return
+            for key, rect in radar_target_hitboxes.items():
+                if rect.collidepoint(pos):
+                    selected_aircraft = key.split(":", 1)[-1]
+                    mark_activity()
+                    return
         selected_page = status_page_at_position(pos, screen.get_size())
         if display_mode == "SHIP STATUS" and selected_page:
             status_page = selected_page
@@ -2057,6 +2323,9 @@ if telemetry:
     telemetry.start()
 if yolink:
     yolink.start()
+if flight_telemetry:
+    flight_telemetry.set_weather_enabled(radar_weather_enabled)
+    flight_telemetry.start()
 
 print(f"MODE: {MODE.upper()} | TEST: {TEST_MODE} | DISPLAY: {screen.get_size()}")
 try:
@@ -2105,6 +2374,9 @@ try:
                 draw_power_status(screen, now,
                                   telemetry.snapshot() if telemetry else {},
                                   yolink.snapshot() if yolink else {})
+            elif status_page == "AIR TRAFFIC":
+                draw_air_traffic_status(screen, now,
+                                        flight_telemetry.snapshot() if flight_telemetry else {})
             else:
                 draw_ship_status(screen, now, telemetry.snapshot() if telemetry else {})
         else:
@@ -2122,6 +2394,8 @@ finally:
         telemetry.stop()
     if yolink:
         yolink.stop()
+    if flight_telemetry:
+        flight_telemetry.stop()
     stop_siren()
     if pygame.mixer.get_init():
         pygame.mixer.stop()
