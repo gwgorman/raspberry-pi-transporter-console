@@ -98,6 +98,9 @@ radar_weather_enabled = False
 selected_aircraft = None
 weather_tile_cache = {}
 radar_target_hitboxes = {}
+selected_satellite = None
+satellite_strip_page = 0
+satellite_target_hitboxes = {}
 pressure_trace = deque(maxlen=120)
 last_pressure_trace_sample = 0.0
 
@@ -2156,6 +2159,7 @@ def draw_country_flag(surface, rect, country):
 
 def draw_satellite_status(surface, now, data):
     """Apollo-era all-sky orbital plot with current and predicted passes."""
+    global satellite_target_hitboxes
     r, w, h = layout(surface.get_size()), *surface.get_size()
     surface.fill(BLACK)
     panel(surface, r["header"], NAVY, CYAN)
@@ -2203,17 +2207,27 @@ def draw_satellite_status(surface, now, data):
         txt(surface, label, h * .015, CREAM, point, "center", True)
 
     overhead = data.get("overhead", [])
+    satellite_target_hitboxes = {}
     for index, satellite in enumerate(overhead):
         point = _satellite_point(center, radius, satellite.get("azimuth", 0),
                                  satellite.get("elevation", 0))
         is_station = any(token in satellite.get("name", "").upper()
                          for token in ("ISS", "TIANGONG", "CSS"))
         color = AMBER if is_station else GREEN if satellite.get("elevation", 0) >= 30 else CYAN
-        pygame.draw.circle(surface, BEZEL, point, 7 if is_station else 5)
+        selected = satellite.get("catalog_id") == selected_satellite
+        if selected:
+            pygame.draw.circle(surface, WHITE, point, 14, 2)
+            pygame.draw.line(surface, WHITE, (point[0] - 19, point[1]),
+                             (point[0] + 19, point[1]), 1)
+            pygame.draw.line(surface, WHITE, (point[0], point[1] - 19),
+                             (point[0], point[1] + 19), 1)
+        pygame.draw.circle(surface, BEZEL, point, 7 if is_station or selected else 5)
         pygame.draw.circle(surface, color, point, 4 if is_station else 3)
-        if index < 8 or is_station:
+        satellite_target_hitboxes[f"sat:{satellite.get('catalog_id')}"] = pygame.Rect(
+            point[0] - 24, point[1] - 24, 48, 48)
+        if index < 8 or is_station or selected:
             txt(surface, satellite.get("name", "")[:18], h * .010, color,
-                (point[0] + 8, point[1] - 7), bold=is_station)
+                (point[0] + 8, point[1] - 7), bold=is_station or selected)
     for planet in data.get("planets", []):
         point = _satellite_point(center, radius, planet.get("azimuth", 0),
                                  planet.get("elevation", 0))
@@ -2244,13 +2258,37 @@ def draw_satellite_status(surface, now, data):
 
     txt(surface, "SATELLITES OVERHEAD", h * .021, CREAM,
         (list_panel.x + 15, list_panel.y + 13), bold=True)
+    ordered_overhead = list(overhead)
+    if selected_satellite:
+        ordered_overhead.sort(key=lambda item: item.get("catalog_id") != selected_satellite)
+    page_size = 4
+    page_count = max(1, math.ceil(len(ordered_overhead) / page_size))
+    active_page = min(satellite_strip_page, page_count - 1)
+    shown_overhead = ordered_overhead[active_page * page_size:(active_page + 1) * page_size]
+    pager_y = list_panel.y + 11
+    prev_rect = pygame.Rect(list_panel.right - 164, pager_y, 42, 28)
+    next_rect = pygame.Rect(list_panel.right - 54, pager_y, 42, 28)
+    for label, rect, enabled in (("◀", prev_rect, active_page > 0),
+                                 ("▶", next_rect, active_page + 1 < page_count)):
+        pygame.draw.rect(surface, (45, 48, 44), rect, border_radius=3)
+        pygame.draw.rect(surface, AMBER if enabled else BEZEL, rect, 2, border_radius=3)
+        txt(surface, label, rect.h * .42, CREAM if enabled else MUTED,
+            rect.center, "center", True)
+    txt(surface, f"{active_page + 1}/{page_count}", h * .012, MUTED,
+        (list_panel.right - 88, pager_y + 14), "center", True)
+    if active_page > 0:
+        satellite_target_hitboxes["page:prev"] = prev_rect.inflate(18, 12)
+    if active_page + 1 < page_count:
+        satellite_target_hitboxes["page:next"] = next_rect.inflate(18, 12)
     row_x = list_panel.x + 12
     current_top = list_panel.y + 48
     current_h = int(h * .069)
-    for index, satellite in enumerate(overhead[:4]):
+    for index, satellite in enumerate(shown_overhead):
         rect = pygame.Rect(row_x, current_top + index * (current_h + 6),
                            list_panel.w - 24, current_h)
-        panel(surface, rect, (6, 13, 15), BEZEL, 3)
+        selected = satellite.get("catalog_id") == selected_satellite
+        panel(surface, rect, (10, 22, 24) if selected else (6, 13, 15),
+              WHITE if selected else BEZEL, 3)
         txt(surface, satellite.get("name", "UNKNOWN")[:24], rect.h * .18, CREAM,
             (rect.x + 10, rect.y + 7), bold=True)
         txt(surface, f"NORAD {satellite.get('catalog_id', '—')}", rect.h * .13, MUTED,
@@ -2263,6 +2301,7 @@ def draw_satellite_status(surface, now, data):
             rect.h * .14, CYAN, (rect.x + 10, rect.bottom - 7), "bottomleft", True)
         txt(surface, f"{satellite.get('range_km', 0) * .621371:,.0f} MI",
             rect.h * .15, WHITE, (rect.right - 9, rect.bottom - 8), "bottomright", True)
+        satellite_target_hitboxes[f"strip:{satellite.get('catalog_id')}"] = rect
     if not overhead:
         txt(surface, "NO CATALOGED OBJECTS ABOVE HORIZON", h * .017, AMBER,
             (list_panel.centerx, current_top + current_h), "center", True)
@@ -2402,6 +2441,7 @@ def draw_destruct_countdown(surface, now):
 def handle_touch(pos, now):
     global arm_until, shutdown_confirm_until, status_page, environment_sensor_page, house_system_page, battery_status_page
     global radar_range_nm, radar_weather_enabled, selected_aircraft
+    global selected_satellite, satellite_strip_page
     if shutdown_confirm_until > now:
         controls = shutdown_layout(screen.get_size())
         if controls["confirm"].collidepoint(pos) and not shutdown_pending:
@@ -2470,6 +2510,20 @@ def handle_touch(pos, now):
                     selected_aircraft = key.split(":", 1)[-1]
                     mark_activity()
                     return
+        if display_mode == "SPACE TRAFFIC":
+            for key, rect in satellite_target_hitboxes.items():
+                if not rect.collidepoint(pos):
+                    continue
+                if key == "page:prev":
+                    satellite_strip_page = max(0, satellite_strip_page - 1)
+                elif key == "page:next":
+                    satellite_strip_page += 1
+                else:
+                    catalog_id = key.split(":", 1)[-1]
+                    selected_satellite = None if catalog_id == selected_satellite else catalog_id
+                    satellite_strip_page = 0
+                mark_activity()
+                return
         selected_page = status_page_at_position(pos, screen.get_size())
         if display_mode == "SHIP STATUS" and selected_page:
             status_page = selected_page

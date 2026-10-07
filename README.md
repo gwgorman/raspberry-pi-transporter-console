@@ -36,7 +36,8 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Clear **CORE & WEATHER** and **ROOM SENSORS** ship-status pages
 - Paginated House Systems page with selected SmartThings groups and Lewisville water data
 - Local PiAware air-traffic radar with flight strips and optional NEXRAD overlay
-- CelesTrak orbital plot with overhead objects, predicted passes, launch metadata, flags, planets, and bright stars
+- CelesTrak orbital plot with touch-selectable overhead objects, paged/pinnable flight strips,
+  predicted passes, launch metadata, flags, planets, and bright stars
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
