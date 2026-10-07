@@ -27,6 +27,9 @@ except ImportError:
 
 MQTT_HOST = "snoop433.local"
 MQTT_PORT = 1883
+SMARTTHINGS_CONFIG = os.path.expanduser("~/.config/startrek-smartthings.json")
+SMARTTHINGS_API = "https://api.smartthings.com/v1"
+SMARTTHINGS_DEFAULT_POLL_SECONDS = 300
 WEATHERFLOW_PORT = 50222
 TEMPEST_CONFIG = os.path.expanduser("~/.config/startrek-tempest.json")
 TEMPEST_REFRESH_SECONDS = 60
@@ -89,6 +92,7 @@ LEAK_TOPICS = {
     "smartthings/Centralite Water Leak Sensor",
     "smartthings/Ice Maker",
 }
+LEAK_NAMES = {topic.split("/", 1)[1] for topic in LEAK_TOPICS}
 
 SYSTEM_GROUPS = {
     "Back Yard": "BACK YARD",
@@ -143,6 +147,62 @@ def _smartthings_summary(payload):
                 summary[f"{capability}_unit"] = unit
             summary["updated"] = max(summary.get("updated", 0.0), stamp)
     return summary
+
+
+SMARTTHINGS_REST_ATTRIBUTES = {
+    "switch": ("switch",),
+    "switchLevel": ("level",),
+    "mediaPlayback": ("playbackStatus",),
+    "audioVolume": ("volume",),
+    "audioMute": ("mute",),
+    "contactSensor": ("contact",),
+    "temperatureMeasurement": ("temperature",),
+    "relativeHumidityMeasurement": ("humidity",),
+    "waterSensor": ("water",),
+    "battery": ("battery",),
+}
+
+
+def _smartthings_rest_summary(payload):
+    """Normalize a SmartThings full-status response into the console schema."""
+    summary = {}
+    components = payload.get("components", {}) if isinstance(payload, dict) else {}
+    for component in components.values():
+        if not isinstance(component, dict):
+            continue
+        for capability, attributes in SMARTTHINGS_REST_ATTRIBUTES.items():
+            values = component.get(capability, {})
+            if not isinstance(values, dict):
+                continue
+            for attribute in attributes:
+                item = values.get(attribute)
+                if not isinstance(item, dict) or item.get("value") is None:
+                    continue
+                value = item["value"]
+                unit = item.get("unit")
+                if attribute == "temperature" and str(unit).upper() in ("C", "°C"):
+                    value = float(value) * 9 / 5 + 32
+                    unit = "F"
+                summary[attribute] = value
+                if unit:
+                    summary[f"{attribute}_unit"] = unit
+                summary["updated"] = max(summary.get("updated", 0.0),
+                                         _iso_epoch(item.get("timestamp")))
+    summary["DeviceWatch-DeviceStatus"] = "online"
+    return summary
+
+
+def _smartthings_api_json(path, token, query=None, timeout=12):
+    url = f"{SMARTTHINGS_API}{path}"
+    if query:
+        url += "?" + urllib.parse.urlencode(query)
+    request = urllib.request.Request(url, headers={
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "startrek-console/1.0",
+    })
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.load(response)
 
 
 def _walk_mapping(value):
@@ -277,6 +337,8 @@ class TelemetryService:
             "house": {"leaks": {}, "systems": {}, "batteries": {}},
             "water": {"lake": {}, "trinity": {}},
             "mqtt": {"connected": False, "updated": 0.0, "error": "STARTING"},
+            "smartthings": {"connected": False, "updated": 0.0,
+                            "error": "NOT CONFIGURED", "devices": 0},
             "weatherflow": {"connected": False, "updated": 0.0, "error": "WAITING"},
             "tempest_cloud": {"connected": False, "updated": 0.0,
                               "error": "NOT CONFIGURED"},
@@ -289,6 +351,7 @@ class TelemetryService:
         for target, name in ((self._system_loop, "ship-system-telemetry"),
                              (self._weather_loop, "ship-weatherflow"),
                              (self._tempest_cloud_loop, "ship-tempest-cloud"),
+                             (self._smartthings_loop, "ship-smartthings-api"),
                              (self._mqtt_loop, "ship-mqtt"),
                              (self._usgs_loop, "ship-usgs-water")):
             thread = threading.Thread(target=target, name=name, daemon=True)
@@ -512,6 +575,100 @@ class TelemetryService:
                 self._data["weather"].update(values)
                 self._data["weatherflow"].update(connected=True, updated=now, error="")
 
+    def _apply_smartthings_summary(self, name, summary, now, source):
+        """Merge one normalized SmartThings device without changing UI schemas."""
+        with self._lock:
+            house = self._data["house"]
+            if summary.get("battery") is not None:
+                level = float(summary["battery"])
+                house.setdefault("batteries", {})[name] = {
+                    "name": name, "source": source, "level_pct": level,
+                    "value_text": f"{level:.0f}%",
+                    "reported_at": summary.get("updated") or now,
+                    "activity_at": summary.get("updated") or now,
+                    "online": summary.get("DeviceWatch-DeviceStatus", "online"),
+                    "unit": summary.get("battery_unit", "%"),
+                }
+            if name.casefold() in ("wine cellar temp", "keg"):
+                key = "wine_cellar" if "wine" in name.casefold() else "keg"
+                house[key] = {
+                    "temperature_f": summary.get("temperature"),
+                    "humidity": summary.get("humidity"),
+                    "updated": summary.get("updated") or now,
+                }
+            if name.casefold() in ("l garage door", "r garage door"):
+                key = "garage_left" if name.casefold().startswith("l ") else "garage_right"
+                house[key] = {"state": summary.get("contact"),
+                              "updated": summary.get("updated") or now}
+            if name in LEAK_NAMES:
+                house.setdefault("leaks", {})[name] = {
+                    "state": summary.get("water"), "updated": summary.get("updated") or now}
+            if name in SYSTEM_GROUPS:
+                system = dict(summary, name=name, group=SYSTEM_GROUPS[name], received=now)
+                house.setdefault("systems", {})[name] = system
+
+    def _smartthings_loop(self):
+        wanted_names = (set(SYSTEM_GROUPS) | LEAK_NAMES |
+                        {"wine cellar temp", "Keg", "L garage door", "R garage door"})
+        canonical = {name.casefold(): name for name in wanted_names}
+        while not self._stop.is_set():
+            try:
+                with open(SMARTTHINGS_CONFIG, encoding="utf-8") as config_file:
+                    config = json.load(config_file)
+            except FileNotFoundError:
+                with self._lock:
+                    self._data["smartthings"].update(
+                        connected=False, error="NOT CONFIGURED")
+                self._stop.wait(30)
+                continue
+            except (OSError, ValueError) as exc:
+                with self._lock:
+                    self._data["smartthings"].update(connected=False, error=str(exc))
+                self._stop.wait(30)
+                continue
+            token = str(config.get("token") or config.get("access_token") or "").strip()
+            if not config.get("enabled") or not token:
+                with self._lock:
+                    self._data["smartthings"].update(
+                        connected=False, error="NOT CONFIGURED")
+                self._stop.wait(30)
+                continue
+            poll_seconds = max(60, int(config.get(
+                "poll_seconds", SMARTTHINGS_DEFAULT_POLL_SECONDS)))
+            try:
+                query = {"locationId": config["location_id"]} if config.get("location_id") else None
+                devices = _smartthings_api_json("/devices", token, query).get("items", [])
+                selected = []
+                for device in devices:
+                    label = str(device.get("label") or device.get("name") or "").strip()
+                    selected_name = canonical.get(label.casefold())
+                    if selected_name and device.get("deviceId"):
+                        selected.append((selected_name, device["deviceId"]))
+                successful = 0
+                errors = []
+                for name, device_id in selected:
+                    if self._stop.is_set():
+                        break
+                    try:
+                        status = _smartthings_api_json(f"/devices/{device_id}/status", token)
+                        summary = _smartthings_rest_summary(status)
+                        self._apply_smartthings_summary(name, summary, time.time(),
+                                                        "SMARTTHINGS API")
+                        successful += 1
+                    except Exception as exc:
+                        errors.append(f"{name}: {exc}")
+                now = time.time()
+                with self._lock:
+                    self._data["smartthings"].update(
+                        connected=bool(successful), updated=now,
+                        devices=successful,
+                        error=(f"{len(errors)} DEVICE ERRORS" if errors else
+                               "NO MATCHING DEVICES" if not selected else ""))
+            except Exception as exc:
+                with self._lock:
+                    self._data["smartthings"].update(connected=False, error=str(exc))
+            self._stop.wait(poll_seconds)
+
     def _mqtt_loop(self):
         if mqtt is None:
             with self._lock:
@@ -563,6 +720,11 @@ class TelemetryService:
         except json.JSONDecodeError:
             payload = text_payload
         topic = message.topic
+        if topic.startswith("smartthings/"):
+            with self._lock:
+                api = dict(self._data.get("smartthings", {}))
+            if api.get("connected") and time.time() - api.get("updated", 0) < 900:
+                return
         updates = {}
         if topic.startswith("smartthings/"):
             name = topic.split("/", 1)[1]

@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "token": "PASTE_TEMPORARY_READ_ONLY_TOKEN_ON_THE_PI",
+  "location_id": "",
+  "poll_seconds": 300
+}

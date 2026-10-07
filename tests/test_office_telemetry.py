@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from office_telemetry import (TelemetryService, _smartthings_summary,
+from office_telemetry import (TelemetryService, _smartthings_rest_summary, _smartthings_summary,
                               _tempest_cloud_summary, _water_summary)
 
 
@@ -34,6 +34,24 @@ class LocalTelemetryParsingTests(unittest.TestCase):
         battery = snapshot["house"]["batteries"]["Attic AC Overflow"]
         self.assertEqual(battery["level_pct"], 22)
         self.assertEqual(battery["value_text"], "22%")
+
+    def test_smartthings_rest_status_normalizes_capabilities_and_celsius(self):
+        payload = {"components": {"main": {
+            "switch": {"switch": {"value": "on", "timestamp": "2026-10-07T20:00:00Z"}},
+            "temperatureMeasurement": {"temperature": {
+                "value": 20, "unit": "C", "timestamp": "2026-10-07T20:00:01Z"}},
+            "waterSensor": {"water": {
+                "value": "dry", "timestamp": "2026-10-07T20:00:02Z"}},
+            "battery": {"battery": {
+                "value": 72, "unit": "%", "timestamp": "2026-10-07T20:00:03Z"}},
+        }}}
+        result = _smartthings_rest_summary(payload)
+        self.assertEqual(result["switch"], "on")
+        self.assertAlmostEqual(result["temperature"], 68)
+        self.assertEqual(result["temperature_unit"], "F")
+        self.assertEqual(result["water"], "dry")
+        self.assertEqual(result["battery"], 72)
+        self.assertEqual(result["DeviceWatch-DeviceStatus"], "online")
 
     def test_usgs_lake_elevation_code(self):
         payload = {"value": {"timeSeries": [{

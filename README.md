@@ -121,12 +121,40 @@ shutter across the affected dial, edge meter, or readout. Valid caution and
 alarm states remain visible normally; the shutter indicates missing telemetry,
 not merely an unfavorable measurement.
 
-The `POWER CELLS` page automatically inventories every retained SmartThings
+The `POWER CELLS` page automatically inventories every selected SmartThings
 device with a battery capability, all supported YoLink sensors, and the Tempest
 station battery voltage. It sorts critical and low cells first, distinguishes
 old/offline reports from genuinely low readings, and shows both battery-report
-age and overall device-activity age. SmartThings discovery uses the local
-`smartthings/#` MQTT tree; no cloud credentials are stored by the kiosk.
+age and overall device-activity age.
+
+### SmartThings status
+
+The preferred SmartThings source is the official read-only REST API. Copy the
+private configuration template on the Pi:
+
+```bash
+install -m 600 startrek-smartthings.example.json ~/.config/startrek-smartthings.json
+```
+
+Generate a temporary Personal Access Token at
+`https://account.smartthings.com/tokens` with device and location read scopes,
+place it in the private file, and change `enabled` to `true`. Do not commit the
+private file or paste its token into logs or issue reports. Current SmartThings
+PATs are short-lived and are intended for discovery and testing; unattended
+operation should ultimately use OAuth access and refresh tokens.
+
+To verify names and capabilities without printing the token:
+
+```bash
+python3 smartthings_inventory.py
+```
+
+`office_telemetry.py` matches the selected device labels, polls their full
+status in the background, converts Celsius readings to Fahrenheit for the
+console, and feeds the existing House Systems, leak, garage-door, climate, and
+battery displays. The old local `smartthings/#` MQTT feed remains an automatic
+fallback while the REST path is being commissioned; fresh API data takes
+priority over retained MQTT messages.
 
 `WATER RECLAMATION` monitors seven named SmartThings water sensors, including
 the Attic AC Overflow device. Its red-and-white shutter means no sufficiently
@@ -273,8 +301,9 @@ shown as `DATA LINK FAULT`; a previously valid measurement remains explicitly
 qualified as `LAST VALID` rather than being replaced with zero.
 
 Copy `startrek.py`, `office_telemetry.py`, `yolink_telemetry.py`,
-`flight_telemetry.py`, `satellite_telemetry.py`, and your audio files into one
-directory, then run:
+`flight_telemetry.py`, `satellite_telemetry.py`, `smartthings_inventory.py`,
+the example configuration files, and your audio files into one directory, then
+run:
 
 ```bash
 python3 startrek.py --test
