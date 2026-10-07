@@ -467,7 +467,7 @@ def tape_meter(surface, rect, value, vertical=False, accent=AMBER, background=IN
         pygame.draw.polygon(surface, accent, [(center, rect.bottom + 1), (center - 8, rect.bottom + 10), (center + 8, rect.bottom + 10)])
         pygame.draw.line(surface, accent, (center, window.top), (center, window.bottom), 2)
 
-def gauge(surface, center, radius, value, label, color):
+def gauge(surface, center, radius, value, label, color, readout_text=None):
     start, span = math.radians(140), math.radians(260)
     box = pygame.Rect(center[0] - radius, center[1] - radius, radius * 2, radius * 2)
     face = pygame.Rect(center[0] - radius - 19, center[1] - radius - 17, radius * 2 + 38, radius * 2 + 49)
@@ -502,7 +502,8 @@ def gauge(surface, center, radius, value, label, color):
     readout = pygame.Rect(center[0] - int(radius * .25), center[1] + int(radius * .24), int(radius * .50), int(radius * .22))
     pygame.draw.rect(surface, (0, 0, 0), readout)
     pygame.draw.rect(surface, BEZEL, readout, 2)
-    txt(surface, f"{int(value * 100):02d}", radius * .17, CREAM, readout.center, "center", True)
+    txt(surface, readout_text if readout_text is not None else f"{int(value * 100):02d}",
+        radius * .17, CREAM, readout.center, "center", True)
     pygame.draw.circle(surface, color, (inner.right - 13, inner.top + 13), 5)
     label_plate = pygame.Rect(center[0] - int(radius * .60), center[1] + int(radius * .54), int(radius * 1.20), int(radius * .18))
     pygame.draw.rect(surface, (198, 194, 170), label_plate, border_radius=2)
@@ -985,20 +986,19 @@ def draw_ship_status(surface, now, data):
     local_weather = bool(weather.get("temperature_c") is not None)
     air_f = (weather.get("temperature_c") * 9 / 5 + 32) if local_weather else forecast.get("temperature_f")
     weather_age = data.get("weatherflow", {}).get("updated") if local_weather else forecast.get("updated")
-    weather_source = "WEATHERFLOW UDP" if local_weather else "MQTT FORECAST"
+    weather_source = "ATMOSPHERIC SENSOR ARRAY" if local_weather else "REMOTE FORECAST ARRAY"
     weather_color = GREEN if weather_age and time.time() - weather_age < 180 else AMBER
-    big_radius = int(min(center.w * .19, center.h * .18))
-    gauge(surface, (center.x + int(center.w * .28), center.y + int(center.h * .28)), big_radius,
-          max(0, min(1, (float(air_f or 0) + 10) / 130)), "AIR TEMPERATURE", AMBER)
+    big_radius = int(min(center.w * .15, center.h * .14))
+    dial_y = center.y + int(center.h * .25)
+    gauge(surface, (center.x + int(center.w * .28), dial_y), big_radius,
+          max(0, min(1, (float(air_f or 0) + 10) / 130)), "AIR TEMP °F", AMBER,
+          f"{air_f:.0f}" if air_f is not None else "—")
     wind_mph = float(weather.get("wind_mps") or 0) * 2.23694
-    gauge(surface, (center.x + int(center.w * .72), center.y + int(center.h * .28)), big_radius,
-          min(1, wind_mph / 50), "WIND VELOCITY", CYAN)
-    txt(surface, f"{air_f:05.1f} °F" if air_f is not None else "NO DATA", h * .025, WHITE,
-        (center.x + int(center.w * .28), center.y + int(center.h * .47)), "center", True)
     direction = weather.get("wind_direction")
-    txt(surface, f"{wind_mph:04.1f} MPH  {int(direction):03d}°" if direction is not None else "WIND LINK WAITING",
-        h * .021, WHITE, (center.x + int(center.w * .72), center.y + int(center.h * .47)), "center", True)
-    meter_y = center.y + int(center.h * .55)
+    gauge(surface, (center.x + int(center.w * .72), dial_y), big_radius,
+          min(1, wind_mph / 50), f"WIND {int(direction):03d}°" if direction is not None else "WIND",
+          CYAN, f"{wind_mph:.0f}")
+    meter_y = center.y + int(center.h * .45)
     meter_h = int(h * .065)
     pressure = float(weather.get("pressure_mb") or 0)
     humidity = float(weather.get("humidity") or 0)
@@ -1008,19 +1008,36 @@ def draw_ship_status(surface, now, data):
     if lightning_km is None:
         lightning_km = weather.get("lightning_5m_km")
     lightning_miles = float(lightning_km) * .621371 if lightning_km is not None else None
-    lightning_detail = (f"STRIKES {lightning_5m}/5M • DIST {lightning_miles:.1f} MI"
-                        if lightning_miles is not None else f"STRIKES {lightning_5m}/5M • DIST —")
     edge_meter(surface, pygame.Rect(center.x + 20, meter_y, center.w - 40, meter_h),
                max(0, min(1, (pressure - 970) / 80)) if pressure else 0, "BAROMETRIC PRESSURE", AMBER)
     edge_meter(surface, pygame.Rect(center.x + 20, meter_y + meter_h + 10, center.w - 40, meter_h),
                humidity / 100, "ATMOSPHERIC HUMIDITY", CYAN)
-    detail_y = meter_y + (meter_h + 10) * 2 + 10
+    lightning_y = meter_y + (meter_h + 10) * 2 + 10
+    lightning_rect = pygame.Rect(center.x + 20, lightning_y, center.w - 40, int(h * .115))
+    lightning_color = RED if lightning_5m else CYAN
+    panel(surface, lightning_rect, (5, 12, 13), lightning_color, 5)
+    pygame.draw.circle(surface, BEZEL, (lightning_rect.x + 20, lightning_rect.y + 22), 10)
+    pygame.draw.circle(surface, lightning_color, (lightning_rect.x + 20, lightning_rect.y + 22), 6)
+    txt(surface, "LIGHTNING PROXIMITY", lightning_rect.h * .16, CREAM,
+        (lightning_rect.x + 38, lightning_rect.y + 9), bold=True)
+    divider_x = lightning_rect.centerx
+    pygame.draw.line(surface, BEZEL, (divider_x, lightning_rect.y + 12),
+                     (divider_x, lightning_rect.bottom - 12), 2)
+    txt(surface, f"{lightning_5m:02d}", lightning_rect.h * .42, lightning_color,
+        (lightning_rect.x + lightning_rect.w * .27, lightning_rect.centery + 12), "center", True)
+    txt(surface, "STRIKES / 5 MIN", lightning_rect.h * .13, MUTED,
+        (lightning_rect.x + lightning_rect.w * .27, lightning_rect.bottom - 7), "midbottom", True)
+    distance_text = f"{lightning_miles:.1f} MI" if lightning_miles is not None else "— MI"
+    txt(surface, distance_text, lightning_rect.h * .34, WHITE,
+        (lightning_rect.x + lightning_rect.w * .73, lightning_rect.centery + 10), "center", True)
+    txt(surface, "LAST / AVG RANGE", lightning_rect.h * .13, MUTED,
+        (lightning_rect.x + lightning_rect.w * .73, lightning_rect.bottom - 7), "midbottom", True)
+    detail_y = lightning_rect.bottom + 10
     age_text, _ = data_age(weather_age)
     telemetry_card(surface, pygame.Rect(center.x + 20, detail_y, center.w - 40, card_h),
                    weather_source,
                    forecast.get("summary", "LOCAL OBSERVATION") if not local_weather else f"RAIN {rain:.2f} IN",
-                   lightning_detail if local_weather else age_text,
-                   RED if local_weather and lightning_5m else weather_color, bool(weather_age))
+                   age_text, weather_color, bool(weather_age))
 
     panel(surface, right, PANEL, BLUE, 12)
     txt(surface, "COMMUNICATIONS", h * .025, CREAM, (right.x + 18, right.y + 14), bold=True)
