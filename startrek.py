@@ -1125,6 +1125,56 @@ def dual_door_card(surface, rect, left_state, right_state, valid=True):
     if not valid:
         invalid_data_flag(surface, inner)
 
+def led_segment_readout(surface, rect, value, color=AMBER):
+    """Four-digit, seven-segment display with a fixed decimal point."""
+    pygame.draw.rect(surface, (55, 58, 52), rect, border_radius=3)
+    window = rect.inflate(-5, -5)
+    pygame.draw.rect(surface, (7, 5, 3), window, border_radius=2)
+    text_value = "--.--" if value is None else f"{min(99.99, max(0.0, value)):05.2f}"
+    digit_map = {
+        "0": "abcedf", "1": "bc", "2": "abdeg", "3": "abcdg",
+        "4": "bcfg", "5": "acdfg", "6": "acdefg", "7": "abc",
+        "8": "abcdefg", "9": "abcdfg", "-": "g",
+    }
+    digit_count = sum(character != "." for character in text_value)
+    dot_count = len(text_value) - digit_count
+    gap = max(2, int(window.h * .06))
+    digit_w = int((window.w - gap * (digit_count + dot_count - 1)) /
+                  (digit_count + dot_count * .28))
+    dot_w = max(4, int(digit_w * .28))
+    thickness = max(3, int(window.h * .12))
+    digit_h = window.h - 4
+    off_color = tuple(max(6, int(channel * .12)) for channel in color)
+    x = window.x + max(2, (window.w - (digit_count * digit_w + dot_count * dot_w +
+                                      gap * (digit_count + dot_count - 1))) // 2)
+    for character in text_value:
+        if character == ".":
+            pygame.draw.circle(surface, color,
+                               (x + dot_w // 2, window.bottom - thickness),
+                               max(2, thickness // 2))
+            x += dot_w + gap
+            continue
+        segments = digit_map.get(character, "")
+        horizontal_w = digit_w - thickness * 2
+        half = digit_h // 2
+        shapes = {
+            "a": pygame.Rect(x + thickness, window.y + 2, horizontal_w, thickness),
+            "g": pygame.Rect(x + thickness, window.y + half - thickness // 2,
+                             horizontal_w, thickness),
+            "d": pygame.Rect(x + thickness, window.y + digit_h - thickness,
+                             horizontal_w, thickness),
+            "f": pygame.Rect(x + 2, window.y + thickness, thickness, half - thickness),
+            "b": pygame.Rect(x + digit_w - thickness - 2, window.y + thickness,
+                             thickness, half - thickness),
+            "e": pygame.Rect(x + 2, window.y + half, thickness, half - thickness),
+            "c": pygame.Rect(x + digit_w - thickness - 2, window.y + half,
+                             thickness, half - thickness),
+        }
+        for name, segment_rect in shapes.items():
+            pygame.draw.rect(surface, color if name in segments else off_color,
+                             segment_rect, border_radius=max(1, thickness // 2))
+        x += digit_w + gap
+
 def precipitation_panel(surface, rect, rate_inh, precip_type, total_in, source,
                         rate_valid=True, total_valid=True):
     """Apollo-style rain rate tape, precipitation lamps, and local-day counter."""
@@ -1141,20 +1191,16 @@ def precipitation_panel(surface, rect, rate_inh, precip_type, total_in, source,
     pygame.draw.rect(surface, (5, 12, 13), inner, border_radius=2)
     txt(surface, f"LOCAL DAY ACCUM • {source}", rect.h * .13, CREAM,
         (inner.x + 7, inner.y + 3), bold=True)
-    if total_in is None:
-        total_text = "— IN"
-    elif 0 < total_in < .005:
-        total_text = "TRACE"
-    else:
-        total_text = f"{total_in:.2f} IN"
-    dial_center = (inner.x + int(inner.w * .25), inner.y + int(inner.h * .58))
-    total_scale = min(1.0, max(0.0, float(total_in or 0)) / 5.0)
-    mini_dial(surface, dial_center, max(20, int(rect.h * .25)), total_scale,
-              "INCHES", total_text.replace(" IN", ""), AMBER, total_valid)
+    led_rect = pygame.Rect(inner.x + 7, inner.y + int(inner.h * .27),
+                           int(inner.w * .53), int(inner.h * .56))
+    led_segment_readout(surface, led_rect, total_in)
+    unit_label = "TRACE • INCHES" if total_in is not None and 0 < total_in < .005 else "INCHES"
+    txt(surface, unit_label, rect.h * .085, MUTED,
+        (led_rect.centerx, inner.bottom - 2), "midbottom", True)
     types = ((0, "DRY"), (1, "RAIN"), (2, "HAIL"), (3, "MIX"))
     for index, (code, label) in enumerate(types):
         column, row = index % 2, index // 2
-        x = int(inner.x + inner.w * (.58 + column * .25))
+        x = int(inner.x + inner.w * (.65 + column * .21))
         y = int(inner.y + inner.h * (.43 + row * .34))
         color = GREEN if code == 0 else CYAN if code == 1 else AMBER if code == 2 else RED
         pygame.draw.circle(surface, BEZEL, (x, y), 6)
