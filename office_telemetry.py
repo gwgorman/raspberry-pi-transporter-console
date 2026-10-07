@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import copy
 import datetime as dt
 import json
@@ -10,6 +11,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 try:
@@ -26,6 +28,8 @@ except ImportError:
 MQTT_HOST = "snoop433.local"
 MQTT_PORT = 1883
 WEATHERFLOW_PORT = 50222
+TEMPEST_CONFIG = os.path.expanduser("~/.config/startrek-tempest.json")
+TEMPEST_REFRESH_SECONDS = 60
 USGS_REFRESH_SECONDS = 900
 USGS_URLS = {
     "lake": ("LewisvilleLake", "https://waterservices.usgs.gov/nwis/iv/"
@@ -75,6 +79,16 @@ HOUSE_TOPICS = (
     "smartthings/Patio Lights 3",
     "smartthings/Patio Speakers",
 )
+
+LEAK_TOPICS = {
+    "smartthings/Upstairs Water Heater Leak",
+    "smartthings/Bar Sink Leak",
+    "smartthings/kitchen Sink Leak",
+    "smartthings/Washing Machine Water Leak Sensor",
+    "smartthings/Attic AC Overflow",
+    "smartthings/Centralite Water Leak Sensor",
+    "smartthings/Ice Maker",
+}
 
 SYSTEM_GROUPS = {
     "Back Yard": "BACK YARD",
@@ -217,6 +231,35 @@ def _water_summary(topic, payload, now):
     return result
 
 
+def _tempest_cloud_summary(payload, received):
+    """Normalize an extended cloud obs_st record without exposing credentials."""
+    observations = payload.get("obs") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict) or payload.get("type") != "obs_st" or not observations:
+        return {"valid": False, "updated": received, "error": "NO TEMPEST OBSERVATION"}
+    ob = observations[-1]
+    if len(ob) < 18:
+        return {"valid": False, "updated": received, "error": "SHORT TEMPEST OBSERVATION"}
+    interval_minutes = float(ob[17] or 1)
+    raw_interval = float(ob[12] or 0)
+    raw_day = float(ob[18]) if len(ob) > 18 and ob[18] is not None else None
+    nearcast_interval = float(ob[19]) if len(ob) > 19 and ob[19] is not None else None
+    nearcast_day = float(ob[20]) if len(ob) > 20 and ob[20] is not None else None
+    analysis_type = int(ob[21] or 0) if len(ob) > 21 else 0
+    use_nearcast = analysis_type == 1 and nearcast_day is not None
+    interval_mm = nearcast_interval if use_nearcast and nearcast_interval is not None else raw_interval
+    return {
+        "valid": True,
+        "updated": received,
+        "observed": float(ob[0]),
+        "rain_rate_mmh": interval_mm * 60 / max(1, interval_minutes),
+        "rain_interval_mm": interval_mm,
+        "precip_type": int(ob[13] or 0),
+        "local_day_rain_mm": nearcast_day if use_nearcast else raw_day,
+        "rain_source": "NEARCAST" if use_nearcast else "TEMPEST",
+        "analysis_type": analysis_type,
+    }
+
+
 class TelemetryService:
     """Collect system, WeatherFlow, and selected MQTT data off the UI thread."""
 
@@ -224,16 +267,19 @@ class TelemetryService:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._last_net = {}
+        self._lightning_observations = collections.OrderedDict()
         self._data = {
             "updated": 0.0,
             "system": {},
             "network": {},
             "weather": {},
             "forecast": {},
-            "house": {"leaks": {}, "systems": {}},
+            "house": {"leaks": {}, "systems": {}, "batteries": {}},
             "water": {"lake": {}, "trinity": {}},
             "mqtt": {"connected": False, "updated": 0.0, "error": "STARTING"},
             "weatherflow": {"connected": False, "updated": 0.0, "error": "WAITING"},
+            "tempest_cloud": {"connected": False, "updated": 0.0,
+                              "error": "NOT CONFIGURED"},
         }
         self._threads = []
 
@@ -242,6 +288,7 @@ class TelemetryService:
             return
         for target, name in ((self._system_loop, "ship-system-telemetry"),
                              (self._weather_loop, "ship-weatherflow"),
+                             (self._tempest_cloud_loop, "ship-tempest-cloud"),
                              (self._mqtt_loop, "ship-mqtt"),
                              (self._usgs_loop, "ship-usgs-water")):
             thread = threading.Thread(target=target, name=name, daemon=True)
@@ -379,6 +426,39 @@ class TelemetryService:
                 self._merge_water(source, summary)
             self._stop.wait(USGS_REFRESH_SECONDS)
 
+    def _tempest_cloud_loop(self):
+        """Poll the authoritative cloud observation once per report interval."""
+        while not self._stop.is_set():
+            try:
+                if os.stat(TEMPEST_CONFIG).st_mode & 0o077:
+                    raise PermissionError("CONFIG FILE MUST USE MODE 0600")
+                with open(TEMPEST_CONFIG, encoding="utf-8") as stream:
+                    config = json.load(stream)
+                if not config.get("enabled") or not config.get("token") or not config.get("device_id"):
+                    raise PermissionError("TEMPEST CREDENTIALS INCOMPLETE")
+                query = urllib.parse.urlencode({"device_id": int(config["device_id"]),
+                                                "token": config["token"]})
+                request = urllib.request.Request(
+                    f"https://swd.weatherflow.com/swd/rest/observations/?{query}",
+                    headers={"User-Agent": "startrek-console/1.0"})
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    summary = _tempest_cloud_summary(json.load(response), time.time())
+                if not summary.get("valid"):
+                    raise ValueError(summary.get("error", "TEMPEST DATA INVALID"))
+                with self._lock:
+                    self._data["weather"].update(summary)
+                    self._data["tempest_cloud"].update(
+                        connected=True, updated=summary["updated"], error="",
+                        station_id=config.get("station_id"), device_id=config.get("device_id"))
+            except FileNotFoundError:
+                with self._lock:
+                    self._data["tempest_cloud"].update(connected=False, error="NOT CONFIGURED")
+            except Exception as exc:
+                with self._lock:
+                    self._data["tempest_cloud"].update(
+                        connected=False, error=type(exc).__name__)
+            self._stop.wait(TEMPEST_REFRESH_SECONDS)
+
     def _handle_weather(self, packet):
         kind, now = packet.get("type"), time.time()
         values = {}
@@ -388,18 +468,43 @@ class TelemetryService:
         elif kind == "obs_st" and packet.get("obs"):
             ob = packet["obs"][0]
             if len(ob) >= 18:
+                observed = float(ob[0])
+                strike_count = max(0, int(ob[15] or 0))
+                strike_distance = float(ob[14]) if strike_count and ob[14] is not None else None
+                self._lightning_observations[observed] = (strike_count, strike_distance)
+                cutoff = observed - 300
+                while self._lightning_observations:
+                    timestamp = next(iter(self._lightning_observations))
+                    if timestamp >= cutoff:
+                        break
+                    self._lightning_observations.popitem(last=False)
+                lightning_5m = sum(item[0] for item in self._lightning_observations.values())
+                recent_distances = [item[1] for item in self._lightning_observations.values()
+                                    if item[0] and item[1] is not None]
                 values = {
                     "observed": ob[0], "wind_lull_mps": ob[1], "wind_mps": ob[2],
                     "wind_gust_mps": ob[3], "wind_direction": ob[4], "pressure_mb": ob[6],
                     "temperature_c": ob[7], "humidity": ob[8], "illuminance": ob[9],
                     "uv": ob[10], "solar_wm2": ob[11], "rain_mm": ob[12],
+                    "rain_rate_mmh": float(ob[12] or 0) * 60 / max(1, float(ob[17] or 1)),
                     "precip_type": ob[13], "lightning_km": ob[14],
-                    "lightning_count": ob[15], "battery_v": ob[16],
+                    "lightning_count": strike_count, "lightning_5m": lightning_5m,
+                    "lightning_5m_km": (sum(recent_distances) / len(recent_distances)
+                                         if recent_distances else None),
+                    "battery_v": ob[16], "station_serial": packet.get("serial_number"),
+                    "hub_serial": packet.get("hub_sn"),
                 }
+                if strike_distance is not None and strike_distance <= 0.804672:
+                    values.update(last_close_lightning=observed,
+                                  last_close_lightning_km=strike_distance)
                 if len(ob) > 18:
                     values["daily_rain_mm"] = ob[18]
         elif kind == "evt_strike" and len(packet.get("evt", ())) >= 2:
-            values = {"last_lightning": packet["evt"][0], "lightning_km": packet["evt"][1]}
+            values = {"last_lightning": packet["evt"][0],
+                      "last_lightning_km": packet["evt"][1]}
+            if float(packet["evt"][1]) <= 0.804672:
+                values.update(last_close_lightning=packet["evt"][0],
+                              last_close_lightning_km=packet["evt"][1])
         elif kind == "evt_precip":
             values = {"precip_active": True, "last_precip": packet.get("evt", [now])[0]}
         if values:
@@ -436,7 +541,11 @@ class TelemetryService:
                                       error="" if connected else f"CONNACK {reason_code}",
                                       updated=time.time())
         if connected:
-            client.subscribe([(topic, 0) for topic in HOUSE_TOPICS])
+            # The wildcard provides a complete retained battery inventory; the
+            # explicit list remains for non-SmartThings local feeds.
+            client.subscribe("smartthings/#")
+            client.subscribe([(topic, 0) for topic in HOUSE_TOPICS
+                              if not topic.startswith("smartthings/")])
 
     def _mqtt_disconnect(self, _client, _userdata, *callback_args):
         reason_code = callback_args[-2] if len(callback_args) >= 2 else callback_args[-1] if callback_args else 0
@@ -455,6 +564,21 @@ class TelemetryService:
             payload = text_payload
         topic = message.topic
         updates = {}
+        if topic.startswith("smartthings/"):
+            name = topic.split("/", 1)[1]
+            summary = _smartthings_summary(payload)
+            if summary.get("battery") is not None:
+                battery_value, battery_stamp, battery_unit = _capability(payload, "battery")
+                updates["battery"] = (name, {
+                    "name": name,
+                    "source": "SMARTTHINGS",
+                    "level_pct": float(battery_value),
+                    "value_text": f"{float(battery_value):.0f}%",
+                    "reported_at": battery_stamp,
+                    "activity_at": summary.get("updated", 0.0),
+                    "online": summary.get("DeviceWatch-DeviceStatus"),
+                    "unit": battery_unit or "%",
+                })
         if topic == "HourlyForecast" and isinstance(payload, list) and payload:
             item = payload[0]
             updates = {"forecast": {"temperature_f": item.get("temperature"),
@@ -466,15 +590,15 @@ class TelemetryService:
             temperature, stamp, _ = _capability(payload, "temperature")
             humidity, humidity_stamp, _ = _capability(payload, "humidity")
             key = "wine_cellar" if "wine cellar" in topic else "keg"
-            updates = {"house": {key: {"temperature_f": temperature, "humidity": humidity,
-                                       "updated": max(stamp, humidity_stamp)}}}
+            updates["house"] = {key: {"temperature_f": temperature, "humidity": humidity,
+                                      "updated": max(stamp, humidity_stamp)}}
         elif topic in ("smartthings/L garage door", "smartthings/R garage door"):
             contact, stamp, _ = _capability(payload, "contact")
             key = "garage_left" if "/L garage" in topic else "garage_right"
-            updates = {"house": {key: {"state": contact, "updated": stamp}}}
-        elif "Leak" in topic or topic.endswith("Ice Maker"):
+            updates["house"] = {key: {"state": contact, "updated": stamp}}
+        elif topic in LEAK_TOPICS:
             water, stamp, _ = _capability(payload, "water")
-            updates = {"leak": (topic.split("/", 1)[-1], water, stamp)}
+            updates["leak"] = (topic.split("/", 1)[-1], water, stamp)
         if topic in ("LewisvilleLake", "TrinityRiver"):
             updates["water_source"] = ("lake" if topic == "LewisvilleLake" else "trinity",
                                        _water_summary(topic, payload, now))
@@ -491,6 +615,9 @@ class TelemetryService:
                 name, state, stamp = updates["leak"]
                 self._data["house"].setdefault("leaks", {})[name] = {
                     "state": state, "updated": stamp}
+            if "battery" in updates:
+                name, item = updates["battery"]
+                self._data["house"].setdefault("batteries", {})[name] = item
             if "system" in updates:
                 name, group, summary = updates["system"]
                 summary.update(name=name, group=group, received=now)

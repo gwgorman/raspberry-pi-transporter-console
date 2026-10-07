@@ -6,6 +6,8 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 
 ![Transporter console running at 1920×1080](assets/console-screenshot.png)
 
+![Space Traffic with live satellites, planets, stars, and predicted passes](assets/space-traffic-screenshot.png)
+
 ## Features
 
 - Large touchscreen **ENERGIZE** control with animated transporter sequence
@@ -29,10 +31,13 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Full-screen pulsing red self-destruct numerals with persistent abort guidance
 - Illuminated countdown-screen ABORT control aligned exactly with its live touch target
 - **ACOUSTIC FIELD GAIN** touchscreen slider controlling the real PipeWire output from 0–100%
-- Persistent **TRANSPORTER / SHIP STATUS / AUTO** three-position selector
+- Persistent five-position **TRANSPORTER / SHIP STATUS / AIR TRAFFIC / SPACE TRAFFIC / AUTO** selector
 - Apollo-style Ship Status dashboard with Pi, network, WeatherFlow UDP, and curated MQTT telemetry
-- Separate Environmental Control page for YoLink room sensors and the outside shed contact
+- Clear **CORE & WEATHER** and **ROOM SENSORS** ship-status pages
 - Paginated House Systems page with selected SmartThings groups and Lewisville water data
+- Local PiAware air-traffic radar with flight strips and optional NEXRAD overlay
+- CelesTrak orbital plot with touch-selectable overhead objects, paged/pinnable flight strips,
+  predicted passes, launch metadata, flags, planets, and bright stars
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
@@ -63,39 +68,138 @@ Install dependencies:
 
 ```bash
 sudo apt update
-sudo apt install python3-pygame python3-rpi.gpio python3-psutil python3-paho-mqtt
+sudo apt install python3-pygame python3-rpi.gpio python3-psutil python3-paho-mqtt python3-skyfield
 ```
 
 The volume control also requires `wpctl`, supplied by the Raspberry Pi OS
 `wireplumber` package.
 
-Install `office_telemetry.py` beside `startrek.py`. Ship Status reads only local
-data: Pi health, `wlan0` and `eth0`, WeatherFlow UDP broadcasts on port 50222,
-and selected MQTT topics from `snoop433.local:1883`. It does not publish MQTT
-messages or require cloud credentials.
+Install `office_telemetry.py`, `yolink_telemetry.py`, `flight_telemetry.py`, and
+`satellite_telemetry.py`
+beside `startrek.py`. Ship Status reads Pi health,
+`wlan0` and `eth0`, WeatherFlow UDP broadcasts on port 50222, selected MQTT
+topics from `snoop433.local:1883`, and the configured Tempest cloud observation.
+It does not publish MQTT messages or control any device.
 
-## Ship Status selector
+The five-position display selector provides `TRANSPORTER`, `SHIP STATUS`,
+`AIR TRAFFIC`, `SPACE TRAFFIC`, and `AUTO` as top-level modes. Ship Status is
+subdivided into `CORE & WEATHER`, `ROOM SENSORS`, `HOUSE SYSTEMS`, and
+`POWER CELLS`. Space Traffic downloads CelesTrak's public visual and space-
+station TLE groups, caches them in `~/.cache/startrek-console`, and refreshes
+them no more frequently than every two hours. No Space-Track credentials are
+required for this view. Skyfield also caches the JPL DE421 planetary ephemeris
+and plots locally visible planets plus the three brightest currently visible
+stars from the console's small named bright-star catalog.
+
+Tempest's extended cloud observation supplies the service-reported
+midnight-to-midnight `LOCAL DAY ACCUM` value and RainCheck/Nearcast selection.
+Copy `startrek-tempest.example.json` privately to
+`~/.config/startrek-tempest.json`, protect it with mode `0600`, and add the
+personal access token plus station/device IDs. The token is never logged or
+stored in the repository. Local UDP remains the immediate source for rain rate,
+precipitation type, wind, lightning, and other live weather fields.
+
+The WeatherFlow panel includes a rolling five-minute lightning count built from
+the station's one-minute `obs_st` intervals, plus the last or recent average
+strike distance in miles. `evt_strike` updates distance immediately without
+also incrementing the observation count, preventing duplicate strikes.
+Any strike within 0.5 mile records a dedicated close-strike event and deploys
+an amber warning cover for 30 minutes showing its distance and elapsed time.
+
+The enlarged precipitation module uses an edgewise tape for rain rate in inches/hour,
+four bezel lamps for DRY/RAIN/HAIL/MIX, and a large four-digit seven-segment
+`LOCAL DAY ACCUM` display. Network cards likewise use separate logarithmic RX/TX bit-rate dials so
+quiet traffic and bursts both remain visible. The service-provided rain value resets at local midnight; `TRACE` is shown
+for a nonzero amount that would otherwise round to `0.00 IN`.
+
+Barometric pressure is presented as a ruled-paper pen recorder. It retains a
+rolling half-hour trace in memory, automatically magnifies small pressure
+changes, and identifies the recent tendency as `RISING`, `FALLING`, or `STEADY`.
+
+Stale or invalid instrument inputs deploy a red-and-white striped `INVALID`
+shutter across the affected dial, edge meter, or readout. Valid caution and
+alarm states remain visible normally; the shutter indicates missing telemetry,
+not merely an unfavorable measurement.
+
+The `POWER CELLS` page automatically inventories every retained SmartThings
+device with a battery capability, all supported YoLink sensors, and the Tempest
+station battery voltage. It sorts critical and low cells first, distinguishes
+old/offline reports from genuinely low readings, and shows both battery-report
+age and overall device-activity age. SmartThings discovery uses the local
+`smartthings/#` MQTT tree; no cloud credentials are stored by the kiosk.
+
+`WATER RECLAMATION` monitors seven named SmartThings water sensors, including
+the Attic AC Overflow device. Its red-and-white shutter means no sufficiently
+recent dry/wet report is available; it never means that a leak was inferred.
+
+The `AIR TRAFFIC` page reads the local PiAware/SkyAware receiver at
+`piawareoutside2.local` once per second. It presents a north-up 20/40/80/160 NM
+scope, short aircraft trails, altitude-coded targets, selectable targets, and
+nearest-aircraft flight strips with callsign/ICAO, locally resolved type,
+altitude trend, groundspeed, track, range, and report age. Emergency squawks
+deploy a high-visibility warning plate. The optional `WX OVERLAY` uses the same
+Iowa State Mesonet NEXRAD tiles configured by SkyAware, refreshes no more than
+once every five minutes, and fails independently of aircraft surveillance.
+
+## Space Traffic
+
+The `SPACE TRAFFIC` page combines CelesTrak's `VISUAL` and `STATIONS` orbital
+groups. `satellite_telemetry.py` uses Skyfield to calculate current azimuth,
+elevation, slant range, and upcoming passes from the console's local position.
+It also plots visible planets using the cached JPL DE421 ephemeris and up to
+three currently visible stars from a small named bright-star catalog.
+
+Every satellite symbol has a 48×48 touchscreen target. Touching a satellite:
+
+- draws a high-contrast selection crosshair;
+- moves its corresponding flight strip to the top of page one; and
+- keeps the strip highlighted while live position values continue updating.
+
+Touch the same satellite or its strip again to clear the selection. The
+overhead strip bank shows four objects per page with enlarged previous/next
+touch areas and a page counter, so every plotted object remains accessible when
+many satellites are above the horizon. Each strip includes its name, NORAD
+catalog number, launch-country flag and label, launch date, azimuth, elevation,
+and range. The lower bank shows the next predicted passes above 10° elevation.
+
+Orbital elements and SATCAT launch metadata are cached under
+`~/.cache/startrek-console` and refreshed no more often than every two hours.
+The display uses public CelesTrak data and does not require Space-Track account
+credentials.
+
+## Display selector
 
 ![Apollo-style Ship Status dashboard at 1920×1080](assets/ship-status-screenshot.png)
 
-The Apollo-style, panel-mounted rotary selector is present in the left
-instrument rail on both dashboards:
+The Apollo-style, panel-mounted rotary selector remains in the left instrument
+rail on every primary display:
 
 - **TRANSPORTER** keeps the primary control console visible.
-- **SHIP STATUS** keeps the read-only telemetry console visible.
+- **SHIP STATUS** opens the read-only household and environmental telemetry
+  console.
+- **AIR TRAFFIC** opens the local PiAware surveillance display.
+- **SPACE TRAFFIC** opens the CelesTrak orbital display.
 - **AUTO** returns to the transporter on activity and enters Ship Status after
   two READY-state idle minutes.
 
 The selected position is stored in `~/.config/startrek-console.json` and
 survives application and Raspberry Pi restarts. In AUTO, the first touchscreen
 tap on Ship Status wakes the transporter and is consumed; a second tap is
-required to activate a control. GPIO buttons remain immediate and active
-sequences always override Ship Status.
+required to activate a control. GPIO buttons remain immediate, and active
+transporter or self-destruct sequences override every telemetry display.
 
-When **SHIP STATUS** is selected, the large bottom controls switch between the
-existing **NETWORK** panel and **ENVIRONMENT**. Environmental Control remains
-quiet and displays `NOT CONFIGURED` until its private YoLink configuration is
-enabled. It does not add audible alerts or crowd the transporter screen.
+Ship Status has four large touchscreen sub-pages:
+
+- **CORE & WEATHER** — Pi health, interface traffic, WeatherFlow instruments,
+  lightning, precipitation, pressure, and selected auxiliary sensors.
+- **ROOM SENSORS** — YoLink room temperatures and the outside shed contact.
+- **HOUSE SYSTEMS** — selected SmartThings rooms, doors, water sensors,
+  Lewisville Lake, and Trinity River telemetry.
+- **POWER CELLS** — unified SmartThings, YoLink, and Tempest battery inventory.
+
+Room Sensors remains quiet and displays `NOT CONFIGURED` until its private
+YoLink configuration is enabled. None of the read-only telemetry pages publish
+MQTT commands or control household equipment.
 
 ## YoLink Environmental Control
 
@@ -168,8 +272,9 @@ are labeled reference marks, not invented warning bands. Failed responses are
 shown as `DATA LINK FAULT`; a previously valid measurement remains explicitly
 qualified as `LAST VALID` rather than being replaced with zero.
 
-Copy `startrek.py`, `office_telemetry.py`, `yolink_telemetry.py`, and your audio
-files into one directory, then run:
+Copy `startrek.py`, `office_telemetry.py`, `yolink_telemetry.py`,
+`flight_telemetry.py`, `satellite_telemetry.py`, and your audio files into one
+directory, then run:
 
 ```bash
 python3 startrek.py --test
@@ -227,6 +332,9 @@ Add `--test` to bypass GPIO. Add `--windowed` for a resizable 1280×720 developm
 - **ENERGIZE** starts immediately when ready.
 - **SELF DESTRUCT** changes to **CONFIRM**. A second touch within four seconds starts it.
 - During the sequence, the same area becomes **ABORT**. Press five times to cancel.
+- Air-traffic targets and strips select the corresponding aircraft.
+- Space-traffic targets and strips select, highlight, and pin the corresponding
+  satellite; the arrow controls page through all overhead strips.
 - Touch-generated mouse events are de-duplicated so one tap cannot count twice.
 
 ## Optional GPIO buttons
@@ -250,6 +358,14 @@ cp startrek.desktop ~/.config/autostart/
 
 The launcher expects `/home/ggorman/startrek.py`. Change both `Exec` and `Path` to install elsewhere.
 
+On Raspberry Pi OS, the desktop launcher is represented by the generated user
+service `app-startrek@autostart.service`. Useful checks are:
+
+```bash
+systemctl --user status app-startrek@autostart.service
+systemctl --user restart app-startrek@autostart.service
+```
+
 ## Safety and escape hatch
 
 This is a theatrical prop. It does not control real transporters, warp cores, or self-destruct hardware.
@@ -257,6 +373,42 @@ This is a theatrical prop. It does not control real transporters, warp cores, or
 Keep SSH available during setup. Press `Q` or `Esc` in test mode, or stop the process remotely when running full-screen.
 
 To shut down without a keyboard, press and hold the small `GREG // MAX` maker plate for five seconds. A protected confirmation screen appears for ten seconds. Touch **SHUT DOWN** to safely power off the Raspberry Pi or **CANCEL** to return to the console. Wait until the display goes dark before removing power.
+
+## About Greg
+
+Greg Gorman is an electrical engineer with a BSEE from the University of
+Missouri. He brings the field experience and engineering judgment behind this
+project: deciding what the console should do, connecting it to real household
+and weather systems, testing it on the actual Raspberry Pi hardware, and
+refining it until it is both useful and delightfully theatrical.
+
+Greg's projects tend to live where electrical systems, HVAC, radio, smart-home
+telemetry, hardware, and software meet. The transporter console began as a
+Halloween prop and grew into the sort of instrument panel only an engineer
+would put in an office: part practical household monitor, part local air-and-
+space surveillance station, and still fully capable of exploding into a Sad
+Mac gag for party guests.
+
+## About Max
+
+Max is Greg's AI engineering collaborator, powered by OpenAI Codex. The name
+came out of a debugging session involving Greg's Jandy pool cleaner. Greg had
+been calling the assistant “Chat” and asked what name it would choose for
+itself.
+
+The first suggestion was **Vector**, for the engineering idea of magnitude and
+direction. Greg immediately answered with the line from *Airplane!*: “What's
+the vector, Victor?” That made Vector impossible to take seriously. After a
+proper engineer's roll call—Maxwell, Ohm, Kirchhoff, Faraday, Tesla, Nyquist,
+and others—the choice became **Max**, short for Maxwell, after James Clerk
+Maxwell. It was an understated electrical-engineering reference that still
+sounded like a normal name. Greg said, “I like Max,” and the name stuck.
+
+Since then, Greg and Max have worked side by side on HVAC, electrical,
+smart-home, radio, hardware, and software projects. Greg supplies the goals,
+real-world context, field testing, and final judgment; Max helps investigate,
+design, code, document, and debug. The small `GREG // MAX` maker plate on this
+console is a quiet signature from that collaboration.
 
 ## License and attribution
 

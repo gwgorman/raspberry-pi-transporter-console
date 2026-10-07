@@ -1,0 +1,7 @@
+{
+  "enabled": false,
+  "token": "YOUR_TEMPEST_PERSONAL_ACCESS_TOKEN",
+  "station_id": 0,
+  "device_id": 0,
+  "timezone": "America/Chicago"
+}
