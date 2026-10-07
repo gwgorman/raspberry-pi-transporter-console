@@ -66,6 +66,7 @@ countdown_value = None
 transport_progress = flash_until = arm_until = 0.0
 shutdown_hold_started = shutdown_confirm_until = 0.0
 shutdown_pending = False
+power_action_pending = None
 afg_dragging = False
 afg_value = 72
 afg_pending = None
@@ -855,19 +856,25 @@ def radar_controls_layout(size):
 def shutdown_layout(size):
     w, h = size
     return {
-        "confirm": pygame.Rect(int(w * .12), int(h * .61), int(w * .46), int(h * .20)),
-        "cancel": pygame.Rect(int(w * .62), int(h * .61), int(w * .26), int(h * .20)),
+        "exit": pygame.Rect(int(w * .10), int(h * .57), int(w * .245), int(h * .16)),
+        "restart": pygame.Rect(int(w * .3775), int(h * .57), int(w * .245), int(h * .16)),
+        "shutdown": pygame.Rect(int(w * .655), int(h * .57), int(w * .245), int(h * .16)),
+        "cancel": pygame.Rect(int(w * .35), int(h * .76), int(w * .30), int(h * .105)),
     }
 
-def request_shutdown():
-    global shutdown_pending
+def request_power_action(action):
+    global shutdown_pending, power_action_pending
+    if action not in ("reboot", "poweroff"):
+        return
     shutdown_pending = True
-    print("SAFE SHUTDOWN REQUESTED")
+    power_action_pending = action
+    print(f"SAFE {action.upper()} REQUESTED")
     time.sleep(0.8)
-    result = subprocess.run(["sudo", "-n", "/usr/bin/systemctl", "poweroff"], check=False)
+    result = subprocess.run(["sudo", "-n", "/usr/bin/systemctl", action], check=False)
     if result.returncode:
         shutdown_pending = False
-        print(f"Shutdown failed with status {result.returncode}")
+        power_action_pending = None
+        print(f"{action.title()} failed with status {result.returncode}")
 
 def draw_shutdown_confirmation(surface, now):
     w, h = surface.get_size()
@@ -877,16 +884,25 @@ def draw_shutdown_confirmation(surface, now):
     border = pygame.Rect(int(w * .08), int(h * .17), int(w * .84), int(h * .68))
     panel(surface, border, (22, 25, 24), BEZEL, 10)
     txt(surface, "GROUND OPERATIONS", h * .028, AMBER, (w // 2, int(h * .24)), "center", True)
-    title = "SHUTTING DOWN" if shutdown_pending else "POWER DOWN CONSOLE?"
+    pending_title = "RESTARTING RASPBERRY PI" if power_action_pending == "reboot" else "SHUTTING DOWN"
+    title = pending_title if shutdown_pending else "CONSOLE OPERATIONS"
     txt(surface, title, h * .068, CREAM, (w // 2, int(h * .36)), "center", True)
-    detail = "WAIT FOR THE DISPLAY TO GO DARK BEFORE REMOVING POWER" if shutdown_pending else "THIS SAFELY STOPS THE RASPBERRY PI"
+    if shutdown_pending and power_action_pending == "reboot":
+        detail = "THE CONSOLE WILL RETURN AUTOMATICALLY"
+    elif shutdown_pending:
+        detail = "WAIT FOR THE DISPLAY TO GO DARK BEFORE REMOVING POWER"
+    else:
+        detail = "SELECT A PROTECTED GROUND OPERATION"
     txt(surface, detail, h * .022, MUTED, (w // 2, int(h * .47)), "center", True)
     if not shutdown_pending:
         controls = shutdown_layout((w, h))
-        button(surface, controls["confirm"], "SHUT DOWN", "CONFIRM SAFE POWER-OFF", RED, True, True)
-        button(surface, controls["cancel"], "CANCEL", "RETURN TO CONSOLE", CYAN, True)
+        button(surface, controls["exit"], "EXIT KIOSK", "RETURN TO DESKTOP", CYAN, True)
+        button(surface, controls["restart"], "RESTART", "REBOOT RASPBERRY PI", AMBER, True)
+        button(surface, controls["shutdown"], "SHUT DOWN", "SAFE POWER-OFF", RED, True, True)
+        button(surface, controls["cancel"], "CANCEL", "RETURN TO CONSOLE", GREEN, True)
         remaining = max(0, int(shutdown_confirm_until - now) + 1)
-        txt(surface, f"CANCELS AUTOMATICALLY IN {remaining}", h * .016, MUTED, (w // 2, int(h * .83)), "center", True)
+        txt(surface, f"CANCELS AUTOMATICALLY IN {remaining}", h * .014, MUTED,
+            (w // 2, int(h * .89)), "center", True)
 
 def draw_console(surface, now):
     r, w, h = layout(surface.get_size()), *surface.get_size()
@@ -2439,13 +2455,19 @@ def draw_destruct_countdown(surface, now):
         (255, 205, 190), (instruction_x, int(h * .935)), "center", True)
 
 def handle_touch(pos, now):
+    global running
     global arm_until, shutdown_confirm_until, status_page, environment_sensor_page, house_system_page, battery_status_page
     global radar_range_nm, radar_weather_enabled, selected_aircraft
     global selected_satellite, satellite_strip_page
     if shutdown_confirm_until > now:
         controls = shutdown_layout(screen.get_size())
-        if controls["confirm"].collidepoint(pos) and not shutdown_pending:
-            threading.Thread(target=request_shutdown, daemon=True).start()
+        if controls["exit"].collidepoint(pos) and not shutdown_pending:
+            print("EXIT KIOSK REQUESTED")
+            running = False
+        elif controls["restart"].collidepoint(pos) and not shutdown_pending:
+            threading.Thread(target=request_power_action, args=("reboot",), daemon=True).start()
+        elif controls["shutdown"].collidepoint(pos) and not shutdown_pending:
+            threading.Thread(target=request_power_action, args=("poweroff",), daemon=True).start()
         elif controls["cancel"].collidepoint(pos):
             shutdown_confirm_until = 0
         return

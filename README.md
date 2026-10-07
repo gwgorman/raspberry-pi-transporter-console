@@ -372,7 +372,16 @@ This is a theatrical prop. It does not control real transporters, warp cores, or
 
 Keep SSH available during setup. Press `Q` or `Esc` in test mode, or stop the process remotely when running full-screen.
 
-To shut down without a keyboard, press and hold the small `GREG // MAX` maker plate for five seconds. A protected confirmation screen appears for ten seconds. Touch **SHUT DOWN** to safely power off the Raspberry Pi or **CANCEL** to return to the console. Wait until the display goes dark before removing power.
+To open Ground Operations without a keyboard, press and hold the small
+`GREG // MAX` maker plate for five seconds. A protected ten-second menu offers:
+
+- **EXIT KIOSK** — close the console application and return to the Pi desktop;
+- **RESTART** — safely reboot the Raspberry Pi and automatically relaunch the
+  console; and
+- **SHUT DOWN** — safely power off the Raspberry Pi.
+
+Touch **CANCEL** or allow the menu to time out to return to the console. After
+choosing **SHUT DOWN**, wait until the display goes dark before removing power.
 
 ## About Greg
 
