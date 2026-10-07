@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 
 import pygame
 
@@ -77,6 +78,8 @@ telemetry = TelemetryService() if TelemetryService else None
 yolink = YoLinkService() if YoLinkService else None
 environment_sensor_page = 0
 house_system_page = 0
+pressure_trace = deque(maxlen=120)
+last_pressure_trace_sample = 0.0
 
 BLACK, NAVY = (4, 7, 12), (8, 18, 30)
 PANEL, PANEL_2 = (14, 31, 45), (18, 42, 58)
@@ -447,6 +450,64 @@ def edge_meter(surface, rect, value, label, color, valid=True, readout_text=None
     jewel = (inner.right - 60, inner.y + 12)
     pygame.draw.circle(surface, BEZEL, jewel, 7)
     pygame.draw.circle(surface, color, jewel, 4)
+    if not valid:
+        invalid_data_flag(surface, inner)
+
+def pressure_pen_tape(surface, rect, pressure_mb, valid=True):
+    """Scrolling ruled-paper barograph with a mechanical pen trace."""
+    global last_pressure_trace_sample
+    sample_time = time.monotonic()
+    if valid and pressure_mb is not None and sample_time - last_pressure_trace_sample >= 15:
+        pressure_trace.append(float(pressure_mb))
+        last_pressure_trace_sample = sample_time
+
+    pygame.draw.rect(surface, (72, 77, 73), rect, border_radius=4)
+    pygame.draw.rect(surface, (145, 148, 137), rect, 2, border_radius=4)
+    inner = rect.inflate(-8, -8)
+    paper = pygame.Rect(inner.x + 5, inner.y + 22, inner.w - 10, inner.h - 27)
+    pygame.draw.rect(surface, (221, 213, 174), paper)
+
+    plate = pygame.Rect(inner.x + 5, inner.y + 3, int(inner.w * .47), 17)
+    pygame.draw.rect(surface, (201, 198, 176), plate, border_radius=2)
+    txt(surface, "BAROMETRIC PEN RECORDER", rect.h * .15, (22, 24, 22),
+        (plate.x + 5, plate.centery), "midleft", True)
+    readout = pygame.Rect(inner.right - 79, inner.y + 3, 74, 17)
+    pygame.draw.rect(surface, BLACK, readout)
+    pygame.draw.rect(surface, BEZEL, readout, 1)
+    value_text = f"{pressure_mb:.1f} MB" if pressure_mb is not None else "— MB"
+    txt(surface, value_text, rect.h * .15, CREAM, readout.center, "center", True)
+
+    # Ruled chart paper: heavier divisions emulate the clock-driven drums used
+    # in old meteorological and aerospace recorders.
+    for index in range(25):
+        x = paper.x + index * paper.w / 24
+        pygame.draw.line(surface, (161, 178, 153), (x, paper.y), (x, paper.bottom),
+                         2 if index % 6 == 0 else 1)
+    for index in range(7):
+        y = paper.y + index * paper.h / 6
+        pygame.draw.line(surface, (161, 178, 153), (paper.x, y), (paper.right, y),
+                         2 if index % 3 == 0 else 1)
+
+    values = list(pressure_trace)
+    if values:
+        center_value = sum(values) / len(values)
+        half_span = max(2.0, max(abs(value - center_value) for value in values) + .35)
+        lower, upper = center_value - half_span, center_value + half_span
+        spacing = paper.w / max(1, pressure_trace.maxlen - 1)
+        points = []
+        for index, value in enumerate(values):
+            x = paper.right - (len(values) - 1 - index) * spacing
+            y = paper.bottom - (value - lower) / (upper - lower) * paper.h
+            points.append((round(x), round(y)))
+        if len(points) > 1:
+            pygame.draw.lines(surface, (102, 45, 32), False, points, 3)
+        pygame.draw.circle(surface, (112, 34, 27), points[-1], 4)
+        comparison = values[max(0, len(values) - 21)]
+        change = values[-1] - comparison
+        trend = "RISING" if change > .08 else "FALLING" if change < -.08 else "STEADY"
+        txt(surface, trend, rect.h * .12, (59, 55, 43),
+            (paper.right - 4, paper.y + 2), "topright", True)
+
     if not valid:
         invalid_data_flag(surface, inner)
 
@@ -1162,9 +1223,9 @@ def draw_ship_status(surface, now, data):
     if lightning_km is None:
         lightning_km = weather.get("lightning_5m_km")
     lightning_miles = float(lightning_km) * .621371 if lightning_km is not None else None
-    edge_meter(surface, pygame.Rect(center.x + 20, meter_y, center.w - 40, meter_h),
-               max(0, min(1, (pressure - 970) / 80)) if pressure else 0,
-               "BAROMETRIC PRESSURE", AMBER, weather_valid and weather.get("pressure_mb") is not None)
+    pressure_pen_tape(surface, pygame.Rect(center.x + 20, meter_y, center.w - 40, meter_h),
+                      pressure if weather.get("pressure_mb") is not None else None,
+                      weather_valid and weather.get("pressure_mb") is not None)
     edge_meter(surface, pygame.Rect(center.x + 20, meter_y + meter_h + 10, center.w - 40, meter_h),
                humidity / 100, "ATMOSPHERIC HUMIDITY", CYAN,
                weather_valid and weather.get("humidity") is not None)

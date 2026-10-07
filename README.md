@@ -93,6 +93,10 @@ dial. Network cards likewise use separate logarithmic RX/TX bit-rate dials so
 quiet traffic and bursts both remain visible. The service-provided rain value resets at local midnight; `TRACE` is shown
 for a nonzero amount that would otherwise round to `0.00 IN`.
 
+Barometric pressure is presented as a ruled-paper pen recorder. It retains a
+rolling half-hour trace in memory, automatically magnifies small pressure
+changes, and identifies the recent tendency as `RISING`, `FALLING`, or `STEADY`.
+
 Stale or invalid instrument inputs deploy a red-and-white striped `INVALID`
 shutter across the affected dial, edge meter, or readout. Valid caution and
 alarm states remain visible normally; the shutter indicates missing telemetry,
