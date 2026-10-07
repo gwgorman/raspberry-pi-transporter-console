@@ -1003,6 +1003,13 @@ def draw_ship_status(surface, now, data):
     pressure = float(weather.get("pressure_mb") or 0)
     humidity = float(weather.get("humidity") or 0)
     rain = float(weather.get("daily_rain_mm") or weather.get("rain_mm") or 0) / 25.4
+    lightning_5m = int(weather.get("lightning_5m") or 0)
+    lightning_km = weather.get("last_lightning_km")
+    if lightning_km is None:
+        lightning_km = weather.get("lightning_5m_km")
+    lightning_miles = float(lightning_km) * .621371 if lightning_km is not None else None
+    lightning_detail = (f"STRIKES {lightning_5m}/5M • DIST {lightning_miles:.1f} MI"
+                        if lightning_miles is not None else f"STRIKES {lightning_5m}/5M • DIST —")
     edge_meter(surface, pygame.Rect(center.x + 20, meter_y, center.w - 40, meter_h),
                max(0, min(1, (pressure - 970) / 80)) if pressure else 0, "BAROMETRIC PRESSURE", AMBER)
     edge_meter(surface, pygame.Rect(center.x + 20, meter_y + meter_h + 10, center.w - 40, meter_h),
@@ -1010,8 +1017,10 @@ def draw_ship_status(surface, now, data):
     detail_y = meter_y + (meter_h + 10) * 2 + 10
     age_text, _ = data_age(weather_age)
     telemetry_card(surface, pygame.Rect(center.x + 20, detail_y, center.w - 40, card_h),
-                   weather_source, forecast.get("summary", "LOCAL OBSERVATION") if not local_weather else f"RAIN {rain:.2f} IN",
-                   age_text, weather_color, bool(weather_age))
+                   weather_source,
+                   forecast.get("summary", "LOCAL OBSERVATION") if not local_weather else f"RAIN {rain:.2f} IN",
+                   lightning_detail if local_weather else age_text,
+                   RED if local_weather and lightning_5m else weather_color, bool(weather_age))
 
     panel(surface, right, PANEL, BLUE, 12)
     txt(surface, "COMMUNICATIONS", h * .025, CREAM, (right.x + 18, right.y + 14), bold=True)

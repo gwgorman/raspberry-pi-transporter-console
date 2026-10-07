@@ -74,6 +74,11 @@ data: Pi health, `wlan0` and `eth0`, WeatherFlow UDP broadcasts on port 50222,
 and selected MQTT topics from `snoop433.local:1883`. It does not publish MQTT
 messages or require cloud credentials.
 
+The WeatherFlow panel includes a rolling five-minute lightning count built from
+the station's one-minute `obs_st` intervals, plus the last or recent average
+strike distance in miles. `evt_strike` updates distance immediately without
+also incrementing the observation count, preventing duplicate strikes.
+
 ## Ship Status selector
 
 ![Apollo-style Ship Status dashboard at 1920×1080](assets/ship-status-screenshot.png)

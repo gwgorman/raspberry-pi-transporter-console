@@ -4,7 +4,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from office_telemetry import _smartthings_summary, _water_summary
+from office_telemetry import TelemetryService, _smartthings_summary, _water_summary
 
 
 class LocalTelemetryParsingTests(unittest.TestCase):
@@ -42,6 +42,25 @@ class LocalTelemetryParsingTests(unittest.TestCase):
         result = _water_summary("TrinityRiver", "ReadError: request aborted", 1)
         self.assertFalse(result["raw_ok"])
         self.assertNotIn("flow_cfs", result)
+
+    def test_tempest_five_minute_lightning_window(self):
+        service = TelemetryService()
+        base = 1_791_394_700
+        for offset, count, distance in ((0, 1, 16), (60, 2, 20), (360, 3, 8)):
+            observation = [base + offset, 0, 0, 0, 0, 60, 997, 27, 43, 100,
+                           1, 20, 0, 0, distance, count, 2.4, 1]
+            service._handle_weather({"type": "obs_st", "serial_number": "ST-TEST",
+                                     "hub_sn": "HB-TEST", "obs": [observation]})
+        weather = service.snapshot()["weather"]
+        self.assertEqual(weather["lightning_5m"], 5)
+        self.assertAlmostEqual(weather["lightning_5m_km"], 14)
+
+    def test_tempest_strike_event_updates_last_distance_without_double_count(self):
+        service = TelemetryService()
+        service._handle_weather({"type": "evt_strike", "evt": [1_791_394_700, 12, 500]})
+        weather = service.snapshot()["weather"]
+        self.assertEqual(weather["last_lightning_km"], 12)
+        self.assertNotIn("lightning_5m", weather)
 
 
 if __name__ == "__main__":

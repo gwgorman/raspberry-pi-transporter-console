@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import copy
 import datetime as dt
 import json
@@ -224,6 +225,7 @@ class TelemetryService:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._last_net = {}
+        self._lightning_observations = collections.OrderedDict()
         self._data = {
             "updated": 0.0,
             "system": {},
@@ -388,18 +390,36 @@ class TelemetryService:
         elif kind == "obs_st" and packet.get("obs"):
             ob = packet["obs"][0]
             if len(ob) >= 18:
+                observed = float(ob[0])
+                strike_count = max(0, int(ob[15] or 0))
+                strike_distance = float(ob[14]) if strike_count and ob[14] is not None else None
+                self._lightning_observations[observed] = (strike_count, strike_distance)
+                cutoff = observed - 300
+                while self._lightning_observations:
+                    timestamp = next(iter(self._lightning_observations))
+                    if timestamp >= cutoff:
+                        break
+                    self._lightning_observations.popitem(last=False)
+                lightning_5m = sum(item[0] for item in self._lightning_observations.values())
+                recent_distances = [item[1] for item in self._lightning_observations.values()
+                                    if item[0] and item[1] is not None]
                 values = {
                     "observed": ob[0], "wind_lull_mps": ob[1], "wind_mps": ob[2],
                     "wind_gust_mps": ob[3], "wind_direction": ob[4], "pressure_mb": ob[6],
                     "temperature_c": ob[7], "humidity": ob[8], "illuminance": ob[9],
                     "uv": ob[10], "solar_wm2": ob[11], "rain_mm": ob[12],
                     "precip_type": ob[13], "lightning_km": ob[14],
-                    "lightning_count": ob[15], "battery_v": ob[16],
+                    "lightning_count": strike_count, "lightning_5m": lightning_5m,
+                    "lightning_5m_km": (sum(recent_distances) / len(recent_distances)
+                                         if recent_distances else None),
+                    "battery_v": ob[16], "station_serial": packet.get("serial_number"),
+                    "hub_serial": packet.get("hub_sn"),
                 }
                 if len(ob) > 18:
                     values["daily_rain_mm"] = ob[18]
         elif kind == "evt_strike" and len(packet.get("evt", ())) >= 2:
-            values = {"last_lightning": packet["evt"][0], "lightning_km": packet["evt"][1]}
+            values = {"last_lightning": packet["evt"][0],
+                      "last_lightning_km": packet["evt"][1]}
         elif kind == "evt_precip":
             values = {"precip_active": True, "last_precip": packet.get("evt", [now])[0]}
         if values:
