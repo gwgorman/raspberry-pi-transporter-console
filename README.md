@@ -141,28 +141,65 @@ deploy a high-visibility warning plate. The optional `WX OVERLAY` uses the same
 Iowa State Mesonet NEXRAD tiles configured by SkyAware, refreshes no more than
 once every five minutes, and fails independently of aircraft surveillance.
 
-## Ship Status selector
+## Space Traffic
+
+The `SPACE TRAFFIC` page combines CelesTrak's `VISUAL` and `STATIONS` orbital
+groups. `satellite_telemetry.py` uses Skyfield to calculate current azimuth,
+elevation, slant range, and upcoming passes from the console's local position.
+It also plots visible planets using the cached JPL DE421 ephemeris and up to
+three currently visible stars from a small named bright-star catalog.
+
+Every satellite symbol has a 48×48 touchscreen target. Touching a satellite:
+
+- draws a high-contrast selection crosshair;
+- moves its corresponding flight strip to the top of page one; and
+- keeps the strip highlighted while live position values continue updating.
+
+Touch the same satellite or its strip again to clear the selection. The
+overhead strip bank shows four objects per page with enlarged previous/next
+touch areas and a page counter, so every plotted object remains accessible when
+many satellites are above the horizon. Each strip includes its name, NORAD
+catalog number, launch-country flag and label, launch date, azimuth, elevation,
+and range. The lower bank shows the next predicted passes above 10° elevation.
+
+Orbital elements and SATCAT launch metadata are cached under
+`~/.cache/startrek-console` and refreshed no more often than every two hours.
+The display uses public CelesTrak data and does not require Space-Track account
+credentials.
+
+## Display selector
 
 ![Apollo-style Ship Status dashboard at 1920×1080](assets/ship-status-screenshot.png)
 
-The Apollo-style, panel-mounted rotary selector is present in the left
-instrument rail on both dashboards:
+The Apollo-style, panel-mounted rotary selector remains in the left instrument
+rail on every primary display:
 
 - **TRANSPORTER** keeps the primary control console visible.
-- **SHIP STATUS** keeps the read-only telemetry console visible.
+- **SHIP STATUS** opens the read-only household and environmental telemetry
+  console.
+- **AIR TRAFFIC** opens the local PiAware surveillance display.
+- **SPACE TRAFFIC** opens the CelesTrak orbital display.
 - **AUTO** returns to the transporter on activity and enters Ship Status after
   two READY-state idle minutes.
 
 The selected position is stored in `~/.config/startrek-console.json` and
 survives application and Raspberry Pi restarts. In AUTO, the first touchscreen
 tap on Ship Status wakes the transporter and is consumed; a second tap is
-required to activate a control. GPIO buttons remain immediate and active
-sequences always override Ship Status.
+required to activate a control. GPIO buttons remain immediate, and active
+transporter or self-destruct sequences override every telemetry display.
 
-When **SHIP STATUS** is selected, the large bottom controls switch between the
-existing **NETWORK** panel and **ENVIRONMENT**. Environmental Control remains
-quiet and displays `NOT CONFIGURED` until its private YoLink configuration is
-enabled. It does not add audible alerts or crowd the transporter screen.
+Ship Status has four large touchscreen sub-pages:
+
+- **CORE & WEATHER** — Pi health, interface traffic, WeatherFlow instruments,
+  lightning, precipitation, pressure, and selected auxiliary sensors.
+- **ROOM SENSORS** — YoLink room temperatures and the outside shed contact.
+- **HOUSE SYSTEMS** — selected SmartThings rooms, doors, water sensors,
+  Lewisville Lake, and Trinity River telemetry.
+- **POWER CELLS** — unified SmartThings, YoLink, and Tempest battery inventory.
+
+Room Sensors remains quiet and displays `NOT CONFIGURED` until its private
+YoLink configuration is enabled. None of the read-only telemetry pages publish
+MQTT commands or control household equipment.
 
 ## YoLink Environmental Control
 
@@ -295,6 +332,9 @@ Add `--test` to bypass GPIO. Add `--windowed` for a resizable 1280×720 developm
 - **ENERGIZE** starts immediately when ready.
 - **SELF DESTRUCT** changes to **CONFIRM**. A second touch within four seconds starts it.
 - During the sequence, the same area becomes **ABORT**. Press five times to cancel.
+- Air-traffic targets and strips select the corresponding aircraft.
+- Space-traffic targets and strips select, highlight, and pin the corresponding
+  satellite; the arrow controls page through all overhead strips.
 - Touch-generated mouse events are de-duplicated so one tap cannot count twice.
 
 ## Optional GPIO buttons
@@ -317,6 +357,14 @@ cp startrek.desktop ~/.config/autostart/
 ```
 
 The launcher expects `/home/ggorman/startrek.py`. Change both `Exec` and `Path` to install elsewhere.
+
+On Raspberry Pi OS, the desktop launcher is represented by the generated user
+service `app-startrek@autostart.service`. Useful checks are:
+
+```bash
+systemctl --user status app-startrek@autostart.service
+systemctl --user restart app-startrek@autostart.service
+```
 
 ## Safety and escape hatch
 
