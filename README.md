@@ -79,6 +79,11 @@ the station's one-minute `obs_st` intervals, plus the last or recent average
 strike distance in miles. `evt_strike` updates distance immediately without
 also incrementing the observation count, preventing duplicate strikes.
 
+Stale or invalid instrument inputs deploy a red-and-white striped `INVALID`
+shutter across the affected dial, edge meter, or readout. Valid caution and
+alarm states remain visible normally; the shutter indicates missing telemetry,
+not merely an unfavorable measurement.
+
 ## Ship Status selector
 
 ![Apollo-style Ship Status dashboard at 1920×1080](assets/ship-status-screenshot.png)

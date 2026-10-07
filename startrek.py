@@ -392,6 +392,25 @@ def panel(surface, rect, color=PANEL, border=BLUE, radius=18):
     pygame.draw.rect(surface, color, rect, border_radius=radius)
     pygame.draw.rect(surface, border, rect, width=2, border_radius=radius)
 
+def invalid_data_flag(surface, rect, label="INVALID"):
+    """Draw a red/white mechanical failure shutter across an instrument face."""
+    bar = pygame.Rect(rect.x + int(rect.w * .08), rect.centery - max(11, int(rect.h * .09)),
+                      int(rect.w * .84), max(22, int(rect.h * .18)))
+    previous_clip = surface.get_clip()
+    surface.set_clip(bar)
+    pygame.draw.rect(surface, RED, bar)
+    stripe = max(12, bar.h)
+    for x in range(bar.left - bar.h, bar.right + bar.h, stripe * 2):
+        pygame.draw.polygon(surface, WHITE,
+                            [(x, bar.bottom), (x + stripe, bar.bottom),
+                             (x + stripe + bar.h, bar.top), (x + bar.h, bar.top)])
+    surface.set_clip(previous_clip)
+    pygame.draw.rect(surface, (18, 18, 16), bar, 3)
+    plate = pygame.Rect(0, 0, min(int(bar.w * .42), 130), int(bar.h * .62))
+    plate.center = bar.center
+    pygame.draw.rect(surface, (12, 12, 11), plate, border_radius=2)
+    txt(surface, label, plate.h * .55, WHITE, plate.center, "center", True)
+
 def bar(surface, rect, value, color=CYAN, segments=20):
     gap = max(2, rect.w // 140)
     sw = (rect.w - gap * (segments - 1)) / segments
@@ -400,7 +419,7 @@ def bar(surface, rect, value, color=CYAN, segments=20):
         r = pygame.Rect(round(rect.x + i * (sw + gap)), rect.y, max(2, round(sw)), rect.h)
         pygame.draw.rect(surface, color if i < active else (28, 58, 68), r, border_radius=3)
 
-def edge_meter(surface, rect, value, label, color):
+def edge_meter(surface, rect, value, label, color, valid=True):
     """Retro edgewise panel meter with a moving pointer over a fixed scale."""
     value = max(0.0, min(1.0, value))
     pygame.draw.rect(surface, (72, 77, 73), rect, border_radius=4)
@@ -426,6 +445,8 @@ def edge_meter(surface, rect, value, label, color):
     jewel = (inner.right - 60, inner.y + 12)
     pygame.draw.circle(surface, BEZEL, jewel, 7)
     pygame.draw.circle(surface, color, jewel, 4)
+    if not valid:
+        invalid_data_flag(surface, inner)
 
 def tape_meter(surface, rect, value, vertical=False, accent=AMBER, background=INSTRUMENT):
     """Apollo-style moving-tape instrument with a fixed datum pointer."""
@@ -467,7 +488,7 @@ def tape_meter(surface, rect, value, vertical=False, accent=AMBER, background=IN
         pygame.draw.polygon(surface, accent, [(center, rect.bottom + 1), (center - 8, rect.bottom + 10), (center + 8, rect.bottom + 10)])
         pygame.draw.line(surface, accent, (center, window.top), (center, window.bottom), 2)
 
-def gauge(surface, center, radius, value, label, color, readout_text=None):
+def gauge(surface, center, radius, value, label, color, readout_text=None, valid=True):
     start, span = math.radians(140), math.radians(260)
     box = pygame.Rect(center[0] - radius, center[1] - radius, radius * 2, radius * 2)
     face = pygame.Rect(center[0] - radius - 19, center[1] - radius - 17, radius * 2 + 38, radius * 2 + 49)
@@ -510,6 +531,8 @@ def gauge(surface, center, radius, value, label, color, readout_text=None):
     txt(surface, label, radius * .105, (22, 24, 22), label_plate.center, "center", True)
     # Restrained glass reflection along the upper-left edge.
     pygame.draw.arc(surface, (72, 86, 85), box.inflate(-18, -18), math.radians(188), math.radians(260), 2)
+    if not valid:
+        invalid_data_flag(surface, inner)
 
 def button(surface, rect, title, subtitle, color, enabled=True, armed=False):
     c = color if enabled else (48, 62, 67)
@@ -916,7 +939,7 @@ def data_age(timestamp):
         return f"STALE {int(age // 60):02d}M", AMBER
     return f"STALE {int(age // 3600):02d}H", RED
 
-def telemetry_card(surface, rect, label, value, detail="", color=GREEN, state=True):
+def telemetry_card(surface, rect, label, value, detail="", color=GREEN, state=True, valid=True):
     pygame.draw.rect(surface, (73, 78, 73), rect, border_radius=4)
     pygame.draw.rect(surface, (158, 159, 145), rect, 2, border_radius=4)
     inner = rect.inflate(-8, -8)
@@ -928,6 +951,8 @@ def telemetry_card(surface, rect, label, value, detail="", color=GREEN, state=Tr
     txt(surface, value, rect.h * .28, WHITE, (inner.x + 36, inner.centery + 4), "midleft", True)
     if detail:
         txt(surface, detail, rect.h * .14, color, (inner.right - 7, inner.bottom - 5), "bottomright", True)
+    if not valid:
+        invalid_data_flag(surface, inner)
 
 def draw_ship_status(surface, now, data):
     """Apollo/steampunk telemetry panel; all data is read-only."""
@@ -961,9 +986,11 @@ def draw_ship_status(surface, now, data):
     gauge_y = left.y + int(left.h * .27)
     radius = int(min(left.w * .19, left.h * .17))
     gauge(surface, (left.x + int(left.w * .28), gauge_y), radius,
-          min(1, system.get("cpu", 0) / 100), "CORE LOAD", GREEN)
+          min(1, system.get("cpu", 0) / 100), "CORE LOAD", GREEN,
+          valid=fresh and system.get("cpu") is not None)
     gauge(surface, (left.x + int(left.w * .72), gauge_y), radius,
-          min(1, system.get("memory", 0) / 100), "LOGIC STORAGE", CYAN)
+          min(1, system.get("memory", 0) / 100), "LOGIC STORAGE", CYAN,
+          valid=fresh and system.get("memory") is not None)
     card_h = int(h * .080)
     temperature_c = system.get("temperature_c")
     temperature_f = temperature_c * 9 / 5 + 32 if temperature_c is not None else None
@@ -972,12 +999,13 @@ def draw_ship_status(surface, now, data):
                                     if temperature_f is not None else "N/A"),
                    "NORMAL" if temperature_c is not None and temperature_c < 75 else "CAUTION",
                    GREEN if temperature_c is not None and temperature_c < 75 else AMBER,
-                   temperature_c is not None)
+                   temperature_c is not None, fresh and temperature_c is not None)
     telemetry_card(surface, pygame.Rect(left.x + 18, left.y + int(left.h * .62), left.w - 36, card_h),
-                   "MISSION ELAPSED TIME", format_uptime(system.get("uptime")), "PI UPTIME", AMBER)
+                   "MISSION ELAPSED TIME", format_uptime(system.get("uptime")), "PI UPTIME", AMBER,
+                   valid=fresh and system.get("uptime") is not None)
     sys_age, sys_age_color = data_age(data.get("updated"))
     telemetry_card(surface, pygame.Rect(left.x + 18, left.y + int(left.h * .74), left.w - 36, card_h),
-                   "TELEMETRY CLOCK", time.strftime("%H:%M:%S"), sys_age, sys_age_color, fresh)
+                   "TELEMETRY CLOCK", time.strftime("%H:%M:%S"), sys_age, sys_age_color, fresh, fresh)
 
     panel(surface, center, PANEL, BLUE, 12)
     txt(surface, "EXTERNAL ENVIRONMENT", h * .025, CREAM, (center.x + 18, center.y + 14), bold=True)
@@ -987,17 +1015,18 @@ def draw_ship_status(surface, now, data):
     air_f = (weather.get("temperature_c") * 9 / 5 + 32) if local_weather else forecast.get("temperature_f")
     weather_age = data.get("weatherflow", {}).get("updated") if local_weather else forecast.get("updated")
     weather_source = "ATMOSPHERIC SENSOR ARRAY" if local_weather else "REMOTE FORECAST ARRAY"
-    weather_color = GREEN if weather_age and time.time() - weather_age < 180 else AMBER
+    weather_valid = bool(weather_age and time.time() - weather_age < 180 and air_f is not None)
+    weather_color = GREEN if weather_valid else RED
     big_radius = int(min(center.w * .15, center.h * .14))
     dial_y = center.y + int(center.h * .25)
     gauge(surface, (center.x + int(center.w * .28), dial_y), big_radius,
           max(0, min(1, (float(air_f or 0) + 10) / 130)), "AIR TEMP °F", AMBER,
-          f"{air_f:.0f}" if air_f is not None else "—")
+          f"{air_f:.0f}" if air_f is not None else "—", weather_valid)
     wind_mph = float(weather.get("wind_mps") or 0) * 2.23694
     direction = weather.get("wind_direction")
     gauge(surface, (center.x + int(center.w * .72), dial_y), big_radius,
           min(1, wind_mph / 50), f"WIND {int(direction):03d}°" if direction is not None else "WIND",
-          CYAN, f"{wind_mph:.0f}")
+          CYAN, f"{wind_mph:.0f}", weather_valid and direction is not None)
     meter_y = center.y + int(center.h * .45)
     meter_h = int(h * .065)
     pressure = float(weather.get("pressure_mb") or 0)
@@ -1009,9 +1038,11 @@ def draw_ship_status(surface, now, data):
         lightning_km = weather.get("lightning_5m_km")
     lightning_miles = float(lightning_km) * .621371 if lightning_km is not None else None
     edge_meter(surface, pygame.Rect(center.x + 20, meter_y, center.w - 40, meter_h),
-               max(0, min(1, (pressure - 970) / 80)) if pressure else 0, "BAROMETRIC PRESSURE", AMBER)
+               max(0, min(1, (pressure - 970) / 80)) if pressure else 0,
+               "BAROMETRIC PRESSURE", AMBER, weather_valid and weather.get("pressure_mb") is not None)
     edge_meter(surface, pygame.Rect(center.x + 20, meter_y + meter_h + 10, center.w - 40, meter_h),
-               humidity / 100, "ATMOSPHERIC HUMIDITY", CYAN)
+               humidity / 100, "ATMOSPHERIC HUMIDITY", CYAN,
+               weather_valid and weather.get("humidity") is not None)
     lightning_y = meter_y + (meter_h + 10) * 2 + 10
     lightning_rect = pygame.Rect(center.x + 20, lightning_y, center.w - 40, int(h * .115))
     lightning_color = RED if lightning_5m else CYAN
@@ -1032,12 +1063,15 @@ def draw_ship_status(surface, now, data):
         (lightning_rect.x + lightning_rect.w * .73, lightning_rect.centery + 10), "center", True)
     txt(surface, "LAST / AVG RANGE", lightning_rect.h * .13, MUTED,
         (lightning_rect.x + lightning_rect.w * .73, lightning_rect.bottom - 7), "midbottom", True)
+    lightning_valid = weather_valid and "lightning_5m" in weather
+    if not lightning_valid:
+        invalid_data_flag(surface, lightning_rect)
     detail_y = lightning_rect.bottom + 10
     age_text, _ = data_age(weather_age)
     telemetry_card(surface, pygame.Rect(center.x + 20, detail_y, center.w - 40, card_h),
                    weather_source,
                    forecast.get("summary", "LOCAL OBSERVATION") if not local_weather else f"RAIN {rain:.2f} IN",
-                   age_text, weather_color, bool(weather_age))
+                   age_text, weather_color, weather_valid, weather_valid)
 
     panel(surface, right, PANEL, BLUE, 12)
     txt(surface, "COMMUNICATIONS", h * .025, CREAM, (right.x + 18, right.y + 14), bold=True)
@@ -1061,18 +1095,25 @@ def draw_ship_status(surface, now, data):
     keg = house.get("keg", {})
     telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
                    "WINE CELLAR CLIMATE", f"{wine.get('temperature_f', '—')} °F  {wine.get('humidity', '—')}%",
-                   data_age(wine.get("updated"))[0], CYAN, bool(wine.get("updated")))
+                   data_age(wine.get("updated"))[0], CYAN, bool(wine.get("updated")),
+                   bool(wine.get("updated") and time.time() - wine["updated"] < 3600))
     aux_y += small_h + 7
     telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
                    "KEG THERMAL", f"{keg.get('temperature_f', '—')} °F  {keg.get('humidity', '—')}%",
-                   data_age(keg.get("updated"))[0], AMBER, bool(keg.get("updated")))
+                   data_age(keg.get("updated"))[0], AMBER, bool(keg.get("updated")),
+                   bool(keg.get("updated") and time.time() - keg["updated"] < 3600))
     aux_y += small_h + 7
-    left_door = house.get("garage_left", {}).get("state", "—")
-    right_door = house.get("garage_right", {}).get("state", "—")
+    left_door_data = house.get("garage_left", {})
+    right_door_data = house.get("garage_right", {})
+    left_door = left_door_data.get("state", "—")
+    right_door = right_door_data.get("state", "—")
     doors_safe = left_door == right_door == "closed"
+    doors_valid = all(item.get("updated") and time.time() - item["updated"] < 86400
+                      for item in (left_door_data, right_door_data))
     telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
                    "SHUTTLE BAY DOORS", f"L {str(left_door).upper()}   R {str(right_door).upper()}",
-                   "SECURED" if doors_safe else "CHECK BAY", GREEN if doors_safe else AMBER, doors_safe)
+                   "SECURED" if doors_safe else "CHECK BAY", GREEN if doors_safe else AMBER,
+                   doors_safe, doors_valid)
     aux_y += small_h + 7
     leaks = house.get("leaks", {})
     current_items = [item for item in leaks.values()
@@ -1082,7 +1123,8 @@ def draw_ship_status(surface, now, data):
     leak_safe = wet == 0
     telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
                    "WATER RECLAMATION", "DRY" if leak_safe else f"{wet} LEAK ALERT",
-                   f"{current}/{len(leaks)} CURRENT", GREEN if leak_safe else RED, leak_safe)
+                   f"{current}/{len(leaks)} CURRENT", GREEN if leak_safe else RED, leak_safe,
+                   bool(current))
     mqtt_age, mqtt_color = data_age(mqtt_info.get("updated"))
     txt(surface, f"SENSOR BUS {'ONLINE' if mqtt_info.get('connected') else 'OFFLINE'}  •  {mqtt_age}",
         h * .014, mqtt_color, (right.centerx, right.bottom - 13), "midbottom", True)
