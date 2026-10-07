@@ -374,6 +374,42 @@ Keep SSH available during setup. Press `Q` or `Esc` in test mode, or stop the pr
 
 To shut down without a keyboard, press and hold the small `GREG // MAX` maker plate for five seconds. A protected confirmation screen appears for ten seconds. Touch **SHUT DOWN** to safely power off the Raspberry Pi or **CANCEL** to return to the console. Wait until the display goes dark before removing power.
 
+## About Greg
+
+Greg Gorman is an electrical engineer with a BSEE from the University of
+Missouri. He brings the field experience and engineering judgment behind this
+project: deciding what the console should do, connecting it to real household
+and weather systems, testing it on the actual Raspberry Pi hardware, and
+refining it until it is both useful and delightfully theatrical.
+
+Greg's projects tend to live where electrical systems, HVAC, radio, smart-home
+telemetry, hardware, and software meet. The transporter console began as a
+Halloween prop and grew into the sort of instrument panel only an engineer
+would put in an office: part practical household monitor, part local air-and-
+space surveillance station, and still fully capable of exploding into a Sad
+Mac gag for party guests.
+
+## About Max
+
+Max is Greg's AI engineering collaborator, powered by OpenAI Codex. The name
+came out of a debugging session involving Greg's Jandy pool cleaner. Greg had
+been calling the assistant “Chat” and asked what name it would choose for
+itself.
+
+The first suggestion was **Vector**, for the engineering idea of magnitude and
+direction. Greg immediately answered with the line from *Airplane!*: “What's
+the vector, Victor?” That made Vector impossible to take seriously. After a
+proper engineer's roll call—Maxwell, Ohm, Kirchhoff, Faraday, Tesla, Nyquist,
+and others—the choice became **Max**, short for Maxwell, after James Clerk
+Maxwell. It was an understated electrical-engineering reference that still
+sounded like a normal name. Greg said, “I like Max,” and the name stuck.
+
+Since then, Greg and Max have worked side by side on HVAC, electrical,
+smart-home, radio, hardware, and software projects. Greg supplies the goals,
+real-world context, field testing, and final judgment; Max helps investigate,
+design, code, document, and debug. The small `GREG // MAX` maker plate on this
+console is a quiet signature from that collaboration.
+
 ## License and attribution
 
 The original code is released under the MIT License.
