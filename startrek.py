@@ -406,10 +406,11 @@ def invalid_data_flag(surface, rect, label="INVALID"):
                              (x + stripe + bar.h, bar.top), (x + bar.h, bar.top)])
     surface.set_clip(previous_clip)
     pygame.draw.rect(surface, (18, 18, 16), bar, 3)
-    plate = pygame.Rect(0, 0, min(int(bar.w * .42), 130), int(bar.h * .62))
-    plate.center = bar.center
-    pygame.draw.rect(surface, (12, 12, 11), plate, border_radius=2)
-    txt(surface, label, plate.h * .55, WHITE, plate.center, "center", True)
+    if bar.w >= 80:
+        plate = pygame.Rect(0, 0, min(int(bar.w * .42), 130), int(bar.h * .62))
+        plate.center = bar.center
+        pygame.draw.rect(surface, (12, 12, 11), plate, border_radius=2)
+        txt(surface, label, plate.h * .55, WHITE, plate.center, "center", True)
 
 def bar(surface, rect, value, color=CYAN, segments=20):
     gap = max(2, rect.w // 140)
@@ -930,6 +931,14 @@ def format_rate(value):
         return f"{value / 1024:4.1f} KB/S"
     return f"{value:4.0f} B/S"
 
+def format_bitrate(bytes_per_second):
+    bits = max(0.0, float(bytes_per_second or 0)) * 8
+    if bits >= 1_000_000:
+        return f"{bits / 1_000_000:.1f}M"
+    if bits >= 1_000:
+        return f"{bits / 1_000:.1f}K"
+    return f"{bits:.0f}"
+
 def data_age(timestamp):
     if not timestamp:
         return "NO DATA", RED
@@ -954,6 +963,59 @@ def telemetry_card(surface, rect, label, value, detail="", color=GREEN, state=Tr
         txt(surface, detail, rect.h * .14, color, (inner.right - 7, inner.bottom - 5), "bottomright", True)
     if not valid:
         invalid_data_flag(surface, inner)
+
+def mini_dial(surface, center, radius, value, label, readout, color, valid=True):
+    """Compact panel-mounted analog indicator for dense status cards."""
+    value = max(0.0, min(1.0, float(value or 0)))
+    pygame.draw.circle(surface, BEZEL, center, radius + 4)
+    pygame.draw.circle(surface, INSTRUMENT, center, radius)
+    start, span = math.radians(140), math.radians(260)
+    for index in range(9):
+        angle = start + span * index / 8
+        outer = (center[0] + math.cos(angle) * radius * .86,
+                 center[1] + math.sin(angle) * radius * .86)
+        inner = (center[0] + math.cos(angle) * radius * (.66 if index % 2 == 0 else .73),
+                 center[1] + math.sin(angle) * radius * (.66 if index % 2 == 0 else .73))
+        pygame.draw.line(surface, CREAM, inner, outer, 2 if index % 2 == 0 else 1)
+    needle = start + span * value
+    endpoint = (center[0] + math.cos(needle) * radius * .62,
+                center[1] + math.sin(needle) * radius * .62)
+    pygame.draw.line(surface, color, center, endpoint, 2)
+    pygame.draw.circle(surface, BEZEL, center, 4)
+    readout_rect = pygame.Rect(center[0] - int(radius * .48), center[1] + int(radius * .16),
+                               int(radius * .96), max(12, int(radius * .30)))
+    pygame.draw.rect(surface, BLACK, readout_rect)
+    pygame.draw.rect(surface, BEZEL, readout_rect, 1)
+    txt(surface, readout, radius * .23, WHITE, readout_rect.center, "center", True)
+    txt(surface, label, radius * .25, CREAM,
+        (center[0], center[1] + radius + 2), "midtop", True)
+    if not valid:
+        invalid_data_flag(surface, pygame.Rect(center[0] - radius, center[1] - radius,
+                                               radius * 2, radius * 2))
+
+def network_instrument_card(surface, rect, label, info):
+    """Network link card with independent logarithmic RX and TX bit-rate dials."""
+    pygame.draw.rect(surface, (73, 78, 73), rect, border_radius=4)
+    pygame.draw.rect(surface, (158, 159, 145), rect, 2, border_radius=4)
+    inner = rect.inflate(-8, -8)
+    pygame.draw.rect(surface, (5, 12, 13), inner, border_radius=2)
+    link_up = bool(info.get("up"))
+    lamp = (inner.x + 17, inner.y + 18)
+    pygame.draw.circle(surface, BEZEL, lamp, 10)
+    pygame.draw.circle(surface, GREEN if link_up else RED, lamp, 6)
+    txt(surface, label, rect.h * .16, CREAM, (inner.x + 34, inner.y + 5), bold=True)
+    txt(surface, info.get("ipv4", "LINK DOWN") if link_up else "LINK DOWN",
+        rect.h * .24, WHITE, (inner.x + 12, inner.centery + 10), "midleft", True)
+    radius = max(22, int(rect.h * .25))
+    centers = ((inner.x + int(inner.w * .68), inner.centery - 1),
+               (inner.x + int(inner.w * .87), inner.centery - 1))
+    for center, key, dial_label, color in ((centers[0], "rx_rate", "RX b/s", GREEN),
+                                           (centers[1], "tx_rate", "TX b/s", CYAN)):
+        byte_rate = float(info.get(key) or 0)
+        bit_rate = byte_rate * 8
+        normalized = min(1.0, math.log10(1 + bit_rate) / 8.0)
+        mini_dial(surface, center, radius, normalized, dial_label,
+                  format_bitrate(byte_rate), color, link_up)
 
 def dual_door_card(surface, rect, left_state, right_state, valid=True):
     """Two independent, bezel-mounted shuttle-bay door indicators."""
@@ -991,7 +1053,7 @@ def precipitation_panel(surface, rect, rate_inh, precip_type, total_in, source,
     pygame.draw.rect(surface, (158, 159, 145), total_rect, 2, border_radius=4)
     inner = total_rect.inflate(-8, -8)
     pygame.draw.rect(surface, (5, 12, 13), inner, border_radius=2)
-    txt(surface, f"LOCAL DAY ACCUM • {source}", rect.h * .14, CREAM,
+    txt(surface, f"LOCAL DAY ACCUM • {source}", rect.h * .13, CREAM,
         (inner.x + 7, inner.y + 3), bold=True)
     if total_in is None:
         total_text = "— IN"
@@ -999,16 +1061,20 @@ def precipitation_panel(surface, rect, rate_inh, precip_type, total_in, source,
         total_text = "TRACE"
     else:
         total_text = f"{total_in:.2f} IN"
-    txt(surface, total_text, rect.h * .27, WHITE,
-        (inner.centerx, inner.y + int(inner.h * .43)), "center", True)
+    dial_center = (inner.x + int(inner.w * .25), inner.y + int(inner.h * .58))
+    total_scale = min(1.0, max(0.0, float(total_in or 0)) / 5.0)
+    mini_dial(surface, dial_center, max(20, int(rect.h * .25)), total_scale,
+              "INCHES", total_text.replace(" IN", ""), AMBER, total_valid)
     types = ((0, "DRY"), (1, "RAIN"), (2, "HAIL"), (3, "MIX"))
     for index, (code, label) in enumerate(types):
-        x = int(inner.x + inner.w * (.10 + index * .25))
+        column, row = index % 2, index // 2
+        x = int(inner.x + inner.w * (.58 + column * .25))
+        y = int(inner.y + inner.h * (.43 + row * .34))
         color = GREEN if code == 0 else CYAN if code == 1 else AMBER if code == 2 else RED
-        pygame.draw.circle(surface, BEZEL, (x, inner.bottom - 11), 6)
+        pygame.draw.circle(surface, BEZEL, (x, y), 6)
         pygame.draw.circle(surface, color if precip_type == code else (24, 28, 25),
-                           (x, inner.bottom - 11), 4)
-        txt(surface, label, rect.h * .095, MUTED, (x + 7, inner.bottom - 11), "midleft", True)
+                           (x, y), 4)
+        txt(surface, label, rect.h * .095, MUTED, (x + 7, y), "midleft", True)
     if not total_valid:
         invalid_data_flag(surface, inner)
 
@@ -1142,10 +1208,7 @@ def draw_ship_status(surface, now, data):
     for index, (name, label) in enumerate((("wlan0", "WIRELESS TELEMETRY"), ("eth0", "HARDLINE TELEMETRY"))):
         info = network.get(name, {})
         card = pygame.Rect(right.x + 16, network_y + index * (network_h + 10), right.w - 32, network_h)
-        state = bool(info.get("up"))
-        detail = f"RX {format_rate(info.get('rx_rate'))}  TX {format_rate(info.get('tx_rate'))}"
-        value = f"{info.get('ipv4', '—')}" if state else "LINK DOWN"
-        telemetry_card(surface, card, label, value, detail, GREEN if state else RED, state)
+        network_instrument_card(surface, card, label, info)
     aux_y = network_y + 2 * (network_h + 10) + 12
     txt(surface, "AUXILIARY SENSOR BUS", h * .020, AMBER, (right.x + 18, aux_y), bold=True)
     aux_y += 34

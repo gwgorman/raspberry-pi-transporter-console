@@ -88,8 +88,9 @@ strike distance in miles. `evt_strike` updates distance immediately without
 also incrementing the observation count, preventing duplicate strikes.
 
 The precipitation module uses an edgewise tape for rain rate in inches/hour,
-four bezel lamps for DRY/RAIN/HAIL/MIX, and a mechanical-style `LOCAL DAY ACCUM`
-counter. The service-provided value resets at local midnight; `TRACE` is shown
+four bezel lamps for DRY/RAIN/HAIL/MIX, and a compact analog `LOCAL DAY ACCUM`
+dial. Network cards likewise use separate logarithmic RX/TX bit-rate dials so
+quiet traffic and bursts both remain visible. The service-provided rain value resets at local midnight; `TRACE` is shown
 for a nonzero amount that would otherwise round to `0.00 IN`.
 
 Stale or invalid instrument inputs deploy a red-and-white striped `INVALID`
