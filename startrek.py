@@ -29,6 +29,11 @@ except ImportError:
     FlightTelemetryService = None
 
 try:
+    from satellite_telemetry import SatelliteTelemetryService
+except ImportError:
+    SatelliteTelemetryService = None
+
+try:
     import RPi.GPIO as GPIO
 except ImportError:
     GPIO = None
@@ -74,8 +79,9 @@ def load_console_preferences():
             config = json.load(config_file)
             mode = config.get("display_mode", "AUTO")
             page = config.get("status_page", "NETWORK")
-            return (mode if mode in ("TRANSPORTER", "SHIP STATUS", "AUTO") else "AUTO",
-                    page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS", "POWER CELLS", "AIR TRAFFIC") else "NETWORK")
+            return (mode if mode in ("TRANSPORTER", "SHIP STATUS", "AIR TRAFFIC",
+                                     "SPACE TRAFFIC", "AUTO") else "AUTO",
+                    page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS", "POWER CELLS") else "NETWORK")
     except (OSError, ValueError, TypeError):
         return "AUTO", "NETWORK"
 
@@ -83,6 +89,7 @@ display_mode, status_page = load_console_preferences()
 telemetry = TelemetryService() if TelemetryService else None
 yolink = YoLinkService() if YoLinkService else None
 flight_telemetry = FlightTelemetryService() if FlightTelemetryService else None
+satellite_telemetry = SatelliteTelemetryService() if SatelliteTelemetryService else None
 environment_sensor_page = 0
 house_system_page = 0
 battery_status_page = 0
@@ -176,7 +183,7 @@ def save_display_mode():
 
 def select_display_mode(mode):
     global display_mode
-    if mode not in ("TRANSPORTER", "SHIP STATUS", "AUTO"):
+    if mode not in ("TRANSPORTER", "SHIP STATUS", "AIR TRAFFIC", "SPACE TRAFFIC", "AUTO"):
         return
     display_mode = mode
     mark_activity()
@@ -189,6 +196,12 @@ def ship_status_active(now):
     if display_mode == "SHIP STATUS":
         return True
     return display_mode == "AUTO" and now - last_activity >= OFFICE_IDLE_SECONDS
+
+def special_display_active(now):
+    return (display_mode in ("AIR TRAFFIC", "SPACE TRAFFIC") and
+            not any_sequence_active and ui_state == "READY" and
+            shutdown_confirm_until <= now and not shutdown_pending and
+            countdown_value is None)
 
 VOICE_CHANNEL = pygame.mixer.Channel(0) if pygame.mixer.get_init() else None
 SIREN_CHANNEL = pygame.mixer.Channel(1) if pygame.mixer.get_init() else None
@@ -666,7 +679,7 @@ def layout(size):
     margin, gap = int(w * .018), int(w * .012)
     header_h, footer_h = int(h * .115), int(h * .205)
     body_y, body_h = margin + header_h + gap, h - (margin + header_h + gap) - footer_h - margin * 2
-    selector_w = max(108, int(w * .068))
+    selector_w = max(132, int(w * .088))
     content_x = margin + selector_w + gap
     content_w = w - margin - content_x
     left_w, right_w = int(content_w * .28), int(content_w * .25)
@@ -678,7 +691,7 @@ def layout(size):
         "right": pygame.Rect(w - margin - right_w, body_y, right_w, body_h),
         "energize": pygame.Rect(margin, h - margin - footer_h, int(w * .64), footer_h),
         "destruct": pygame.Rect(margin + int(w * .64) + gap, h - margin - footer_h, w - margin * 2 - int(w * .64) - gap, footer_h),
-        "mode_selector": pygame.Rect(margin, body_y, selector_w, min(body_h, int(h * .37))),
+        "mode_selector": pygame.Rect(margin, body_y, selector_w, min(body_h, int(h * .48))),
     }
     result["maker_plate"] = pygame.Rect(result["right"].x + 62, result["right"].bottom - 31, result["right"].w - 124, 18)
     result["afg"] = pygame.Rect(result["center"].x + 62,
@@ -687,20 +700,20 @@ def layout(size):
     return result
 
 def draw_mode_selector(surface, rect):
-    """Panel-mounted three-position rotary display selector."""
+    """Panel-mounted five-position rotary display selector."""
     panel(surface, rect, (38, 42, 39), BEZEL, 5)
     inner = rect.inflate(-10, -10)
     pygame.draw.rect(surface, (10, 14, 13), inner, border_radius=3)
     txt(surface, "DISPLAY", rect.w * .105, CREAM, (rect.centerx, rect.y + 18), "midtop", True)
     txt(surface, "SELECTOR", rect.w * .085, MUTED, (rect.centerx, rect.y + 35), "midtop", True)
 
-    options = ("TRANSPORTER", "SHIP STATUS", "AUTO")
+    options = ("TRANSPORTER", "SHIP STATUS", "AIR TRAFFIC", "SPACE TRAFFIC", "AUTO")
     knob_center = (rect.centerx, rect.y + int(rect.h * .31))
     radius = max(25, int(rect.w * .29))
     pygame.draw.circle(surface, (155, 157, 145), knob_center, radius + 9)
     pygame.draw.circle(surface, (28, 31, 29), knob_center, radius + 5)
     pygame.draw.circle(surface, (76, 80, 74), knob_center, radius)
-    angles = (-140, -90, -40)
+    angles = (-150, -120, -90, -60, -30)
     selected_index = options.index(display_mode)
     for index, angle in enumerate(angles):
         radians = math.radians(angle)
@@ -717,12 +730,12 @@ def draw_mode_selector(surface, rect):
     pygame.draw.circle(surface, (177, 178, 163), knob_center, 10, 2)
 
     row_top = rect.y + int(rect.h * .51)
-    row_h = max(34, int((rect.bottom - row_top - 10) / 3))
+    row_h = max(30, int((rect.bottom - row_top - 10) / len(options)))
     for index, option in enumerate(options):
         segment = pygame.Rect(rect.x + 8, row_top + index * row_h,
                               rect.w - 16, row_h - 5)
         selected = display_mode == option
-        color = GREEN if option == "AUTO" else AMBER
+        color = GREEN if option == "AUTO" else BLUE if "TRAFFIC" in option else AMBER
         pygame.draw.rect(surface, (190, 188, 166) if selected else (91, 94, 87), segment, border_radius=2)
         pygame.draw.rect(surface, color if selected else (145, 146, 134), segment, 2, border_radius=2)
         lamp = (segment.x + 10, segment.centery)
@@ -736,12 +749,12 @@ def mode_at_position(pos, size):
     rect = layout(size)["mode_selector"]
     if not rect.collidepoint(pos):
         return None
-    options = ("TRANSPORTER", "SHIP STATUS", "AUTO")
+    options = ("TRANSPORTER", "SHIP STATUS", "AIR TRAFFIC", "SPACE TRAFFIC", "AUTO")
     row_top = rect.y + int(rect.h * .51)
     if pos[1] < row_top:
         return options[(options.index(display_mode) + 1) % len(options)]
-    row_h = max(34, int((rect.bottom - row_top - 10) / 3))
-    index = min(2, max(0, int((pos[1] - row_top) / row_h)))
+    row_h = max(30, int((rect.bottom - row_top - 10) / len(options)))
+    index = min(len(options) - 1, max(0, int((pos[1] - row_top) / row_h)))
     return options[index]
 
 def status_nav_layout(size):
@@ -750,14 +763,13 @@ def status_nav_layout(size):
     footer = pygame.Rect(r["mode_selector"].right + gap, size[1] - int(size[1] * .075),
                          size[0] - r["mode_selector"].right - gap - int(size[0] * .018),
                          int(size[1] * .052))
-    fifth = (footer.w - gap * 4) // 5
+    fourth = (footer.w - gap * 3) // 4
     return {
-        "NETWORK": pygame.Rect(footer.x, footer.y, fifth, footer.h),
-        "ENVIRONMENT": pygame.Rect(footer.x + fifth + gap, footer.y, fifth, footer.h),
-        "HOUSE SYSTEMS": pygame.Rect(footer.x + (fifth + gap) * 2, footer.y, fifth, footer.h),
-        "POWER CELLS": pygame.Rect(footer.x + (fifth + gap) * 3, footer.y, fifth, footer.h),
-        "AIR TRAFFIC": pygame.Rect(footer.x + (fifth + gap) * 4, footer.y,
-                                   footer.w - fifth * 4 - gap * 4, footer.h),
+        "NETWORK": pygame.Rect(footer.x, footer.y, fourth, footer.h),
+        "ENVIRONMENT": pygame.Rect(footer.x + fourth + gap, footer.y, fourth, footer.h),
+        "HOUSE SYSTEMS": pygame.Rect(footer.x + (fourth + gap) * 2, footer.y, fourth, footer.h),
+        "POWER CELLS": pygame.Rect(footer.x + (fourth + gap) * 3, footer.y,
+                                   footer.w - fourth * 3 - gap * 3, footer.h),
     }
 
 def status_page_at_position(pos, size):
@@ -767,15 +779,16 @@ def status_page_at_position(pos, size):
     return None
 
 def draw_status_nav(surface):
+    labels = {"NETWORK": "CORE & WEATHER", "ENVIRONMENT": "ROOM SENSORS",
+              "HOUSE SYSTEMS": "HOUSE SYSTEMS", "POWER CELLS": "POWER CELLS"}
     for page, rect in status_nav_layout(surface.get_size()).items():
         selected = status_page == page
         color = (CYAN if page == "NETWORK" else AMBER if page == "ENVIRONMENT"
-                 else GREEN if page == "HOUSE SYSTEMS" else ORANGE if page == "POWER CELLS"
-                 else BLUE)
+                 else GREEN if page == "HOUSE SYSTEMS" else ORANGE)
         pygame.draw.rect(surface, tuple(channel // (4 if selected else 8) for channel in color),
                          rect, border_radius=5)
         pygame.draw.rect(surface, color if selected else BEZEL, rect, 3, border_radius=5)
-        txt(surface, page, rect.h * .30, WHITE if selected else MUTED,
+        txt(surface, labels[page], rect.h * .30, WHITE if selected else MUTED,
             rect.center, "center", True)
 
 def environment_pager_layout(size):
@@ -1264,7 +1277,7 @@ def draw_ship_status(surface, now, data):
     panel(surface, r["header"], NAVY, CYAN)
     txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
         (r["header"].x + 24, r["header"].y + 15), bold=True)
-    txt(surface, "SHIP SYSTEMS STATUS", h * .047, WHITE,
+    txt(surface, "COMPUTATION / WEATHER", h * .047, WHITE,
         (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
     draw_mode_selector(surface, r["mode_selector"])
     fresh = time.time() - data.get("updated", 0) < 4
@@ -1455,7 +1468,7 @@ def draw_environment_status(surface, now, data):
     panel(surface, r["header"], NAVY, CYAN)
     txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
         (r["header"].x + 24, r["header"].y + 15), bold=True)
-    txt(surface, "ENVIRONMENTAL CONTROL", h * .047, WHITE,
+    txt(surface, "HABITATION SENSOR GRID", h * .047, WHITE,
         (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
     draw_mode_selector(surface, r["mode_selector"])
     source = data.get("source", {})
@@ -1957,7 +1970,7 @@ def draw_air_traffic_status(surface, now, data):
 
     gap, margin = int(w * .012), int(w * .018)
     body_y = r["header"].bottom + gap
-    nav_y = status_nav_layout(surface.get_size())["NETWORK"].y
+    nav_y = h - margin
     content_x = r["mode_selector"].right + gap
     content_w = w - margin - content_x
     left_w = int(content_w * .65)
@@ -2077,7 +2090,205 @@ def draw_air_traffic_status(surface, now, data):
         target = emergencies[0]
         txt(surface, f"AIRSPACE EMERGENCY • {str(target.get('flight') or target.get('hex')).strip()} • SQUAWK {target.get('squawk', '—')}",
             warning.h * .31, WHITE, warning.center, "center", True)
-    draw_status_nav(surface)
+
+def _satellite_point(center, radius, azimuth, elevation):
+    radial = radius * (90.0 - max(0.0, min(90.0, elevation))) / 90.0
+    angle = math.radians(azimuth - 90.0)
+    return (round(center[0] + math.cos(angle) * radial),
+            round(center[1] + math.sin(angle) * radial))
+
+def _pass_clock(timestamp):
+    return time.strftime("%H:%M", time.localtime(timestamp)) if timestamp else "—"
+
+def draw_country_flag(surface, rect, country):
+    """Draw a compact flag plate without depending on color-emoji fonts."""
+    country = str(country or "UNKNOWN").upper()
+    pygame.draw.rect(surface, (218, 216, 194), rect)
+    if country == "USA":
+        stripe_h = max(1, rect.h // 7)
+        for index in range(7):
+            pygame.draw.rect(surface, RED if index % 2 == 0 else WHITE,
+                             (rect.x, rect.y + index * stripe_h, rect.w, stripe_h + 1))
+        pygame.draw.rect(surface, (31, 62, 116), (rect.x, rect.y, rect.w * .43, rect.h * .55))
+    elif country in ("RUSSIA", "NETHERLANDS"):
+        colors = (WHITE, BLUE, RED) if country == "RUSSIA" else (RED, WHITE, BLUE)
+        for index, color in enumerate(colors):
+            pygame.draw.rect(surface, color, (rect.x, rect.y + index * rect.h // 3,
+                                               rect.w, rect.h // 3 + 1))
+    elif country == "CHINA":
+        pygame.draw.rect(surface, (202, 28, 35), rect)
+        pygame.draw.circle(surface, (255, 218, 45), (rect.x + 7, rect.y + 6), 3)
+    elif country == "JAPAN":
+        pygame.draw.circle(surface, (188, 0, 45), rect.center, max(3, rect.h // 3))
+    elif country == "INDIA":
+        for index, color in enumerate(((255, 153, 51), WHITE, (19, 136, 8))):
+            pygame.draw.rect(surface, color, (rect.x, rect.y + index * rect.h // 3,
+                                               rect.w, rect.h // 3 + 1))
+        pygame.draw.circle(surface, (0, 0, 128), rect.center, 2)
+    elif country in ("FRANCE", "FRENCH GUIANA"):
+        for index, color in enumerate(((20, 53, 132), WHITE, (239, 65, 53))):
+            pygame.draw.rect(surface, color, (rect.x + index * rect.w // 3, rect.y,
+                                               rect.w // 3 + 1, rect.h))
+    elif country == "BRAZIL":
+        pygame.draw.rect(surface, (0, 146, 70), rect)
+        pygame.draw.polygon(surface, (255, 223, 0),
+                            ((rect.centerx, rect.y + 2), (rect.right - 3, rect.centery),
+                             (rect.centerx, rect.bottom - 2), (rect.x + 3, rect.centery)))
+        pygame.draw.circle(surface, (0, 39, 118), rect.center, 3)
+    elif country == "NORWAY":
+        pygame.draw.rect(surface, (186, 12, 47), rect)
+        pygame.draw.rect(surface, WHITE, (rect.x + 7, rect.y, 5, rect.h))
+        pygame.draw.rect(surface, WHITE, (rect.x, rect.y + rect.h // 2 - 2, rect.w, 5))
+        pygame.draw.rect(surface, (0, 32, 91), (rect.x + 8, rect.y, 2, rect.h))
+        pygame.draw.rect(surface, (0, 32, 91), (rect.x, rect.y + rect.h // 2 - 1, rect.w, 2))
+    elif country == "KAZAKHSTAN":
+        pygame.draw.rect(surface, (0, 175, 202), rect)
+        pygame.draw.circle(surface, (255, 203, 0), rect.center, 3)
+    elif country == "ISRAEL":
+        pygame.draw.rect(surface, WHITE, rect)
+        pygame.draw.line(surface, BLUE, (rect.x, rect.y + 3), (rect.right, rect.y + 3), 2)
+        pygame.draw.line(surface, BLUE, (rect.x, rect.bottom - 4), (rect.right, rect.bottom - 4), 2)
+        pygame.draw.circle(surface, BLUE, rect.center, 3, 1)
+    else:
+        pygame.draw.rect(surface, (66, 72, 69), rect)
+        txt(surface, country[:3], rect.h * .48, CREAM, rect.center, "center", True)
+    pygame.draw.rect(surface, BEZEL, rect, 1)
+
+def draw_satellite_status(surface, now, data):
+    """Apollo-era all-sky orbital plot with current and predicted passes."""
+    r, w, h = layout(surface.get_size()), *surface.get_size()
+    surface.fill(BLACK)
+    panel(surface, r["header"], NAVY, CYAN)
+    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
+        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    txt(surface, "ORBITAL TRACKING • SPACE TRAFFIC", h * .047, WHITE,
+        (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
+    draw_mode_selector(surface, r["mode_selector"])
+
+    catalog_age = time.time() - float(data.get("catalog_updated") or 0)
+    connected = bool(data.get("connected")) and catalog_age < 14400
+    link_color = GREEN if connected else RED
+    pygame.draw.circle(surface, link_color, (r["header"].right - 38, r["header"].centery), 14)
+    txt(surface, "ORBITAL SOLUTION NOMINAL" if connected else "ORBITAL DATA FAULT", h * .023,
+        link_color, (r["header"].right - 66, r["header"].centery), "midright", True)
+
+    gap, margin = int(w * .012), int(w * .018)
+    body_y = r["header"].bottom + gap
+    body_h = h - margin - body_y
+    content_x = r["mode_selector"].right + gap
+    content_w = w - margin - content_x
+    sky_w = int(content_w * .61)
+    sky_panel = pygame.Rect(content_x, body_y, sky_w, body_h)
+    list_panel = pygame.Rect(sky_panel.right + gap, body_y,
+                             content_x + content_w - sky_panel.right - gap, body_h)
+    panel(surface, sky_panel, PANEL, BLUE, 10)
+    panel(surface, list_panel, PANEL, BLUE, 10)
+    txt(surface, "LOCAL CELESTIAL HEMISPHERE", h * .020, CREAM,
+        (sky_panel.centerx, sky_panel.y + 14), "midtop", True)
+
+    center = (sky_panel.centerx, sky_panel.y + int(sky_panel.h * .53))
+    radius = int(min(sky_panel.w * .39, sky_panel.h * .42))
+    pygame.draw.circle(surface, (3, 10, 13), center, radius)
+    for elevation in (0, 30, 60):
+        ring = int(radius * (90 - elevation) / 90)
+        pygame.draw.circle(surface, (32, 84, 91), center, ring, 2 if elevation == 0 else 1)
+        txt(surface, f"{elevation}°", h * .010, MUTED,
+            (center[0] + 5, center[1] - ring + 3), bold=True)
+    pygame.draw.line(surface, (32, 84, 91), (center[0] - radius, center[1]),
+                     (center[0] + radius, center[1]), 1)
+    pygame.draw.line(surface, (32, 84, 91), (center[0], center[1] - radius),
+                     (center[0], center[1] + radius), 1)
+    for azimuth, label in ((0, "N"), (90, "E"), (180, "S"), (270, "W")):
+        point = _satellite_point(center, radius + 18, azimuth, 0)
+        txt(surface, label, h * .015, CREAM, point, "center", True)
+
+    overhead = data.get("overhead", [])
+    for index, satellite in enumerate(overhead):
+        point = _satellite_point(center, radius, satellite.get("azimuth", 0),
+                                 satellite.get("elevation", 0))
+        is_station = any(token in satellite.get("name", "").upper()
+                         for token in ("ISS", "TIANGONG", "CSS"))
+        color = AMBER if is_station else GREEN if satellite.get("elevation", 0) >= 30 else CYAN
+        pygame.draw.circle(surface, BEZEL, point, 7 if is_station else 5)
+        pygame.draw.circle(surface, color, point, 4 if is_station else 3)
+        if index < 8 or is_station:
+            txt(surface, satellite.get("name", "")[:18], h * .010, color,
+                (point[0] + 8, point[1] - 7), bold=is_station)
+    for planet in data.get("planets", []):
+        point = _satellite_point(center, radius, planet.get("azimuth", 0),
+                                 planet.get("elevation", 0))
+        pygame.draw.polygon(surface, AMBER,
+                            ((point[0], point[1] - 7), (point[0] + 7, point[1]),
+                             (point[0], point[1] + 7), (point[0] - 7, point[1])), 2)
+        txt(surface, planet.get("name", ""), h * .010, AMBER,
+            (point[0] + 9, point[1] + 2), "midleft", True)
+    for star in data.get("stars", []):
+        point = _satellite_point(center, radius, star.get("azimuth", 0),
+                                 star.get("elevation", 0))
+        pygame.draw.line(surface, WHITE, (point[0] - 5, point[1]),
+                         (point[0] + 5, point[1]), 2)
+        pygame.draw.line(surface, WHITE, (point[0], point[1] - 5),
+                         (point[0], point[1] + 5), 2)
+        txt(surface, star.get("name", ""), h * .009, WHITE,
+            (point[0] + 8, point[1] - 5), bold=True)
+    pygame.draw.circle(surface, WHITE, center, 4)
+    txt(surface, "ZENITH", h * .010, WHITE, (center[0] + 8, center[1] + 5), bold=True)
+    txt(surface, f"SAT {len(overhead):02d}  •  PLANETS {len(data.get('planets', [])):02d}  •  CATALOG {int(data.get('catalog_count') or 0):03d}",
+        h * .014, GREEN if connected else RED,
+        (sky_panel.centerx, sky_panel.bottom - 14), "midbottom", True)
+    txt(surface, "● SATELLITE    ◇ PLANET    + BRIGHT STAR", h * .011, MUTED,
+        (sky_panel.x + 17, sky_panel.bottom - 14), "bottomleft", True)
+    if not connected:
+        invalid_data_flag(surface, pygame.Rect(center[0] - radius, center[1] - radius,
+                                               radius * 2, radius * 2), "ORBIT DATA")
+
+    txt(surface, "SATELLITES OVERHEAD", h * .021, CREAM,
+        (list_panel.x + 15, list_panel.y + 13), bold=True)
+    row_x = list_panel.x + 12
+    current_top = list_panel.y + 48
+    current_h = int(h * .069)
+    for index, satellite in enumerate(overhead[:4]):
+        rect = pygame.Rect(row_x, current_top + index * (current_h + 6),
+                           list_panel.w - 24, current_h)
+        panel(surface, rect, (6, 13, 15), BEZEL, 3)
+        txt(surface, satellite.get("name", "UNKNOWN")[:24], rect.h * .18, CREAM,
+            (rect.x + 10, rect.y + 7), bold=True)
+        txt(surface, f"NORAD {satellite.get('catalog_id', '—')}", rect.h * .13, MUTED,
+            (rect.right - 9, rect.y + 8), "topright", True)
+        flag = pygame.Rect(rect.x + 10, rect.centery - 7, 25, 14)
+        draw_country_flag(surface, flag, satellite.get("launch_country"))
+        txt(surface, f"{satellite.get('launch_country', 'UNKNOWN')}  •  LAUNCH {satellite.get('launch_date') or '—'}",
+            rect.h * .115, AMBER, (flag.right + 6, rect.centery + 1), "midleft", True)
+        txt(surface, f"AZ {satellite.get('azimuth', 0):05.1f}°  EL {satellite.get('elevation', 0):04.1f}°",
+            rect.h * .14, CYAN, (rect.x + 10, rect.bottom - 7), "bottomleft", True)
+        txt(surface, f"{satellite.get('range_km', 0) * .621371:,.0f} MI",
+            rect.h * .15, WHITE, (rect.right - 9, rect.bottom - 8), "bottomright", True)
+    if not overhead:
+        txt(surface, "NO CATALOGED OBJECTS ABOVE HORIZON", h * .017, AMBER,
+            (list_panel.centerx, current_top + current_h), "center", True)
+
+    passes_y = current_top + 4 * (current_h + 6) + 15
+    txt(surface, "NEXT 10° PASSES • LOCAL TIME", h * .019, AMBER,
+        (list_panel.x + 15, passes_y), bold=True)
+    pass_top = passes_y + 34
+    pass_h = int(h * .060)
+    for index, orbit_pass in enumerate(data.get("upcoming", [])[:6]):
+        rect = pygame.Rect(row_x, pass_top + index * (pass_h + 5), list_panel.w - 24, pass_h)
+        pygame.draw.rect(surface, (7, 15, 16), rect, border_radius=3)
+        pygame.draw.rect(surface, BEZEL, rect, 1, border_radius=3)
+        txt(surface, orbit_pass.get("name", "UNKNOWN")[:20], rect.h * .17, CREAM,
+            (rect.x + 9, rect.y + 6), bold=True)
+        flag = pygame.Rect(rect.x + 9, rect.centery - 6, 22, 12)
+        draw_country_flag(surface, flag, orbit_pass.get("launch_country"))
+        txt(surface, f"{orbit_pass.get('launch_country', 'UNKNOWN')}  •  {orbit_pass.get('launch_date') or '—'}",
+            rect.h * .10, AMBER, (flag.right + 5, rect.centery + 1), "midleft", True)
+        txt(surface, f"RISE {_pass_clock(orbit_pass.get('rise'))}  PEAK {_pass_clock(orbit_pass.get('culminate'))}",
+            rect.h * .105, MUTED, (rect.x + 9, rect.bottom - 5), "bottomleft", True)
+        elevation = orbit_pass.get("max_elevation")
+        txt(surface, f"{elevation:.0f}°" if elevation is not None else "—",
+            rect.h * .23, AMBER, (rect.right - 9, rect.centery), "midright", True)
+    txt(surface, f"CELESTRAK VISUAL + STATIONS  •  ELEMENTS {compact_age(data.get('catalog_updated'))}",
+        h * .011, MUTED, (list_panel.centerx, list_panel.bottom - 9), "midbottom", True)
 
 def draw_sad_mac(surface):
     """Full-screen monochrome homage to the original compact-Mac crash icon."""
@@ -2203,7 +2414,7 @@ def handle_touch(pos, now):
     if selected_mode:
         select_display_mode(selected_mode)
         return
-    if ship_status_active(now):
+    if ship_status_active(now) or special_display_active(now):
         if display_mode == "SHIP STATUS" and status_page == "ENVIRONMENT":
             sensor_count = len((yolink.snapshot() if yolink else {}).get("temperature_sensors", []))
             page_count = max(1, math.ceil(sensor_count / 6))
@@ -2241,7 +2452,7 @@ def handle_touch(pos, now):
                 battery_status_page = min(page_count - 1, battery_status_page + 1)
                 mark_activity()
                 return
-        if display_mode == "SHIP STATUS" and status_page == "AIR TRAFFIC":
+        if display_mode == "AIR TRAFFIC":
             controls = radar_controls_layout(screen.get_size())
             for value in (20, 40, 80, 160):
                 if controls[value].collidepoint(pos):
@@ -2288,7 +2499,8 @@ def handle_touch(pos, now):
 def handle_press(pos, now):
     global shutdown_hold_started, afg_dragging
     r = layout(screen.get_size())
-    if mode_at_position(pos, screen.get_size()) or ship_status_active(now):
+    if (mode_at_position(pos, screen.get_size()) or ship_status_active(now) or
+            special_display_active(now)):
         handle_touch(pos, now)
         return
     if (r["afg"].collidepoint(pos) and countdown_value is None and
@@ -2326,6 +2538,8 @@ if yolink:
 if flight_telemetry:
     flight_telemetry.set_weather_enabled(radar_weather_enabled)
     flight_telemetry.start()
+if satellite_telemetry:
+    satellite_telemetry.start()
 
 print(f"MODE: {MODE.upper()} | TEST: {TEST_MODE} | DISPLAY: {screen.get_size()}")
 try:
@@ -2365,6 +2579,12 @@ try:
             draw_mushroom_cloud(screen, now)
         elif ui_state == "SAD_MAC":
             draw_sad_mac(screen)
+        elif display_mode == "AIR TRAFFIC" and special_display_active(now):
+            draw_air_traffic_status(screen, now,
+                                    flight_telemetry.snapshot() if flight_telemetry else {})
+        elif display_mode == "SPACE TRAFFIC" and special_display_active(now):
+            draw_satellite_status(screen, now,
+                                  satellite_telemetry.snapshot() if satellite_telemetry else {})
         elif ship_status_active(now):
             if status_page == "ENVIRONMENT":
                 draw_environment_status(screen, now, yolink.snapshot() if yolink else {})
@@ -2374,9 +2594,6 @@ try:
                 draw_power_status(screen, now,
                                   telemetry.snapshot() if telemetry else {},
                                   yolink.snapshot() if yolink else {})
-            elif status_page == "AIR TRAFFIC":
-                draw_air_traffic_status(screen, now,
-                                        flight_telemetry.snapshot() if flight_telemetry else {})
             else:
                 draw_ship_status(screen, now, telemetry.snapshot() if telemetry else {})
         else:
@@ -2396,6 +2613,8 @@ finally:
         yolink.stop()
     if flight_telemetry:
         flight_telemetry.stop()
+    if satellite_telemetry:
+        satellite_telemetry.stop()
     stop_siren()
     if pygame.mixer.get_init():
         pygame.mixer.stop()

@@ -6,6 +6,8 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 
 ![Transporter console running at 1920×1080](assets/console-screenshot.png)
 
+![Space Traffic with live satellites, planets, stars, and predicted passes](assets/space-traffic-screenshot.png)
+
 ## Features
 
 - Large touchscreen **ENERGIZE** control with animated transporter sequence
@@ -29,10 +31,12 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Full-screen pulsing red self-destruct numerals with persistent abort guidance
 - Illuminated countdown-screen ABORT control aligned exactly with its live touch target
 - **ACOUSTIC FIELD GAIN** touchscreen slider controlling the real PipeWire output from 0–100%
-- Persistent **TRANSPORTER / SHIP STATUS / AUTO** three-position selector
+- Persistent five-position **TRANSPORTER / SHIP STATUS / AIR TRAFFIC / SPACE TRAFFIC / AUTO** selector
 - Apollo-style Ship Status dashboard with Pi, network, WeatherFlow UDP, and curated MQTT telemetry
-- Separate Environmental Control page for YoLink room sensors and the outside shed contact
+- Clear **CORE & WEATHER** and **ROOM SENSORS** ship-status pages
 - Paginated House Systems page with selected SmartThings groups and Lewisville water data
+- Local PiAware air-traffic radar with flight strips and optional NEXRAD overlay
+- CelesTrak orbital plot with overhead objects, predicted passes, launch metadata, flags, planets, and bright stars
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
@@ -63,17 +67,28 @@ Install dependencies:
 
 ```bash
 sudo apt update
-sudo apt install python3-pygame python3-rpi.gpio python3-psutil python3-paho-mqtt
+sudo apt install python3-pygame python3-rpi.gpio python3-psutil python3-paho-mqtt python3-skyfield
 ```
 
 The volume control also requires `wpctl`, supplied by the Raspberry Pi OS
 `wireplumber` package.
 
-Install `office_telemetry.py`, `yolink_telemetry.py`, and `flight_telemetry.py`
+Install `office_telemetry.py`, `yolink_telemetry.py`, `flight_telemetry.py`, and
+`satellite_telemetry.py`
 beside `startrek.py`. Ship Status reads Pi health,
 `wlan0` and `eth0`, WeatherFlow UDP broadcasts on port 50222, selected MQTT
 topics from `snoop433.local:1883`, and the configured Tempest cloud observation.
 It does not publish MQTT messages or control any device.
+
+The five-position display selector provides `TRANSPORTER`, `SHIP STATUS`,
+`AIR TRAFFIC`, `SPACE TRAFFIC`, and `AUTO` as top-level modes. Ship Status is
+subdivided into `CORE & WEATHER`, `ROOM SENSORS`, `HOUSE SYSTEMS`, and
+`POWER CELLS`. Space Traffic downloads CelesTrak's public visual and space-
+station TLE groups, caches them in `~/.cache/startrek-console`, and refreshes
+them no more frequently than every two hours. No Space-Track credentials are
+required for this view. Skyfield also caches the JPL DE421 planetary ephemeris
+and plots locally visible planets plus the three brightest currently visible
+stars from the console's small named bright-star catalog.
 
 Tempest's extended cloud observation supplies the service-reported
 midnight-to-midnight `LOCAL DAY ACCUM` value and RainCheck/Nearcast selection.
@@ -220,7 +235,8 @@ shown as `DATA LINK FAULT`; a previously valid measurement remains explicitly
 qualified as `LAST VALID` rather than being replaced with zero.
 
 Copy `startrek.py`, `office_telemetry.py`, `yolink_telemetry.py`,
-`flight_telemetry.py`, and your audio files into one directory, then run:
+`flight_telemetry.py`, `satellite_telemetry.py`, and your audio files into one
+directory, then run:
 
 ```bash
 python3 startrek.py --test
