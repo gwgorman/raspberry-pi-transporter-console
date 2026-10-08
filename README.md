@@ -285,7 +285,8 @@ Garage Refrigerator, Hallway, and Patio panels. It extracts only useful status
 capabilities such as switch state, dimmer level, audio playback/volume, device
 health, temperature, and water state. Old retained values retain their actual
 report age instead of being presented as fresh observations. The page is
-read-only and paginates six groups at a time.
+read-only and presents nine compact system groups alongside compact Lewisville
+Reservoir and Trinity outflow instruments.
 
 Water Resources polls the primary USGS feeds directly every 15 minutes in a
 background worker, while retaining the existing MQTT topics as fallback:
