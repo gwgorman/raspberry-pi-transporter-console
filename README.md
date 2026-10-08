@@ -4,13 +4,14 @@ A full-screen, touch-first sci-fi transporter console built for a Halloween part
 
 Designed and built by Greg Gorman with Max (OpenAI Codex).
 
-![Transporter console running at 1920×1080](assets/console-screenshot.png)
+![Transporter console with Starfleet masthead running at 1920×1080](assets/transporter-starfleet-screenshot.png)
 
 ![Space Traffic with live satellites, planets, stars, and predicted passes](assets/space-traffic-screenshot.png)
 
 ## Features
 
 - Large touchscreen **ENERGIZE** control with animated transporter sequence
+- Starfleet-style vector delta and wide sci-fi masthead on the transporter page
 - Ten-second synchronized transport cycle with a gentle audio fade at completion
 - Protected two-touch **SELF DESTRUCT** control
 - Spoken ten-second countdown, siren, explosion, and five-press abort sequence
@@ -451,5 +452,12 @@ console is a quiet signature from that collaboration.
 ## License and attribution
 
 The original code is released under the MIT License.
+
+The bundled [Michroma](assets/fonts/Michroma-Regular.ttf) display font is
+Copyright 2011 The Michroma Project Authors and is distributed under the SIL
+Open Font License 1.1; its license is included at
+[`assets/fonts/Michroma-OFL.txt`](assets/fonts/Michroma-OFL.txt). It is used for
+the transporter masthead while operational instruments retain DejaVu Sans for
+readability.
 
 This is an unofficial fan-made project inspired by classic science-fiction control panels. *Star Trek* and related names and marks belong to their respective owners. No affiliation or endorsement is claimed. Audio from the television programs or films is not distributed here.

@@ -414,12 +414,50 @@ def trigger_self_destruct():
 def font(size, bold=False):
     return pygame.font.SysFont("DejaVu Sans", max(12, int(size)), bold=bold)
 
+_display_font_cache = {}
+
+def display_font(size):
+    """Load the bundled OFL display face used only for the transporter masthead."""
+    pixel_size = max(12, int(size))
+    if pixel_size not in _display_font_cache:
+        path = os.path.join(BASE_DIR, "assets", "fonts", "Michroma-Regular.ttf")
+        try:
+            _display_font_cache[pixel_size] = pygame.font.Font(path, pixel_size)
+        except (OSError, pygame.error):
+            _display_font_cache[pixel_size] = pygame.font.SysFont(
+                "DejaVu Sans", pixel_size, bold=True)
+    return _display_font_cache[pixel_size]
+
 def txt(surface, value, size, color, pos, anchor="topleft", bold=False):
     image = font(size, bold).render(str(value), True, color)
     rect = image.get_rect()
     setattr(rect, anchor, pos)
     surface.blit(image, rect)
     return rect
+
+def display_txt(surface, value, size, color, pos, anchor="topleft"):
+    image = display_font(size).render(str(value), True, color)
+    rect = image.get_rect()
+    setattr(rect, anchor, pos)
+    surface.blit(image, rect)
+    return rect
+
+def draw_starfleet_delta(surface, rect):
+    """Draw a compact original vector homage to the classic command delta."""
+    x, y, w, h = rect
+    outer = ((x + w * .50, y), (x + w * .91, y + h * .95),
+             (x + w * .53, y + h * .73), (x + w * .10, y + h * .95))
+    pygame.draw.polygon(surface, (212, 176, 72), outer)
+    inner = ((x + w * .50, y + h * .13), (x + w * .77, y + h * .78),
+             (x + w * .52, y + h * .63), (x + w * .25, y + h * .79))
+    pygame.draw.polygon(surface, (7, 14, 20), inner)
+    pygame.draw.lines(surface, (255, 226, 129), True, outer, max(2, int(w * .04)))
+    star = (x + w * .49, y + h * .41)
+    flare = ((star[0], star[1] - h * .09), (star[0] + w * .035, star[1] - h * .025),
+             (star[0] + w * .11, star[1]), (star[0] + w * .035, star[1] + h * .025),
+             (star[0], star[1] + h * .10), (star[0] - w * .035, star[1] + h * .025),
+             (star[0] - w * .11, star[1]), (star[0] - w * .035, star[1] - h * .025))
+    pygame.draw.polygon(surface, CREAM, flare)
 
 def panel(surface, rect, color=PANEL, border=BLUE, radius=18):
     pygame.draw.rect(surface, color, rect, border_radius=radius)
@@ -908,8 +946,13 @@ def draw_console(surface, now):
     r, w, h = layout(surface.get_size()), *surface.get_size()
     surface.fill(RED if now < flash_until else BLACK)
     panel(surface, r["header"], NAVY, CYAN)
-    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED, (r["header"].x + 24, r["header"].y + 15), bold=True)
-    txt(surface, "TRANSPORTER CONTROL", h * .047, WHITE, (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
+    display_txt(surface, "STARFLEET TRANSPORT COMMAND  •  NCC-1701", h * .017,
+                MUTED, (r["header"].x + 24, r["header"].y + 16))
+    display_txt(surface, "TRANSPORTER CONTROL", h * .043, WHITE,
+                (r["header"].x + 24, r["header"].bottom - 15), "bottomleft")
+    emblem = pygame.Rect(r["header"].right - int(w * .285), r["header"].y + 11,
+                         int(h * .066), int(h * .090))
+    draw_starfleet_delta(surface, emblem)
     lamp = GREEN if ui_state in ("READY", "COMPLETE") else RED if ui_state in ("DESTRUCT", "DESTROYED") else AMBER
     pygame.draw.circle(surface, lamp, (r["header"].right - 38, r["header"].centery), 14)
     txt(surface, ui_state, h * .03, lamp, (r["header"].right - 66, r["header"].centery), "midright", True)
