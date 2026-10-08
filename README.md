@@ -157,7 +157,7 @@ battery displays. The old local `smartthings/#` MQTT feed remains an automatic
 fallback while the REST path is being commissioned; fresh API data takes
 priority over retained MQTT messages.
 
-`WATER RECLAMATION` monitors seven named SmartThings water sensors, including
+`WATER RECLAMATION` monitors six named SmartThings water sensors, including
 the Attic AC Overflow device. Its red-and-white shutter means no sufficiently
 recent dry/wet report is available; it never means that a leak was inferred.
 
@@ -285,8 +285,8 @@ Hallway, Fence 1, individual Patio 1–3 controls, and Patio Audio panels. It ex
 capabilities such as switch state, dimmer level, audio playback/volume, device
 health, temperature, and water state. Old retained values retain their actual
 report age instead of being presented as fresh observations. The page is
-read-only and presents twelve compact system groups alongside compact Lewisville
-Reservoir and Trinity outflow instruments.
+read-only and presents up to twelve compact system groups per page alongside
+compact Lewisville Reservoir and Trinity outflow instruments.
 
 SmartThings-backed Sonos rooms display **NOW PLAYING**, source, track, and artist
 only while playback is active. Paused historical metadata is deliberately hidden
