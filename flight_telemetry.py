@@ -26,6 +26,14 @@ def _json(url, timeout=3):
         return json.load(response)
 
 
+def _optional_json(url, timeout=3):
+    """Read supplementary receiver metadata without breaking live tracks."""
+    try:
+        return _json(url, timeout=timeout)
+    except (OSError, ValueError, urllib.error.URLError):
+        return {}
+
+
 def _bytes(url, timeout=5):
     request = urllib.request.Request(url, headers={"User-Agent": "startrek-console/1.0"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -150,7 +158,7 @@ class FlightTelemetryService:
                     receiver = _json(RECEIVER_URL)
                     receiver_refresh = now
                 if now - status_refresh > 10 or not status:
-                    status = _json(STATUS_URL)
+                    status = _optional_json(STATUS_URL)
                     status_refresh = now
                 payload = _json(AIRCRAFT_URL)
                 aircraft = []

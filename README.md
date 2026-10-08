@@ -172,6 +172,10 @@ altitude trend, groundspeed, track, range, and report age. Emergency squawks
 deploy a high-visibility warning plate. The optional `WX OVERLAY` uses the same
 Iowa State Mesonet NEXRAD tiles configured by SkyAware, refreshes no more than
 once every five minutes, and fails independently of aircraft surveillance.
+The supplementary PiAware status endpoint is also optional: unavailable radio
+or MLAT metadata does not suppress healthy aircraft and receiver feeds.
+
+![Live Air Traffic radar and flight strips](assets/air-traffic-screenshot.png)
 
 ## Space Traffic
 
@@ -229,13 +233,15 @@ Ship Status has four large touchscreen sub-pages:
   Lewisville Lake, and Trinity River telemetry.
 - **POWER CELLS** — unified SmartThings, YoLink, and Tempest battery inventory.
 
+![Live Power Cells battery inventory](assets/power-cells-screenshot.png)
+
 Room Sensors remains quiet and displays `NOT CONFIGURED` until its private
 YoLink configuration is enabled. None of the read-only telemetry pages publish
 MQTT commands or control household equipment.
 
 ## YoLink Environmental Control
 
-![Environmental Control page before private YoLink configuration](assets/environment-screenshot.png)
+![Live Room Sensors environmental page](assets/environment-screenshot.png)
 
 The integration uses an ordinary YoLink account UAC and the existing cloud hub;
 it does not require a Local Hub. HTTPS provides inventory and reconciliation,
