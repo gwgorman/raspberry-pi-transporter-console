@@ -414,12 +414,50 @@ def trigger_self_destruct():
 def font(size, bold=False):
     return pygame.font.SysFont("DejaVu Sans", max(12, int(size)), bold=bold)
 
+_display_font_cache = {}
+
+def display_font(size):
+    """Load the bundled OFL display face used only for the transporter masthead."""
+    pixel_size = max(12, int(size))
+    if pixel_size not in _display_font_cache:
+        path = os.path.join(BASE_DIR, "assets", "fonts", "Michroma-Regular.ttf")
+        try:
+            _display_font_cache[pixel_size] = pygame.font.Font(path, pixel_size)
+        except (OSError, pygame.error):
+            _display_font_cache[pixel_size] = pygame.font.SysFont(
+                "DejaVu Sans", pixel_size, bold=True)
+    return _display_font_cache[pixel_size]
+
 def txt(surface, value, size, color, pos, anchor="topleft", bold=False):
     image = font(size, bold).render(str(value), True, color)
     rect = image.get_rect()
     setattr(rect, anchor, pos)
     surface.blit(image, rect)
     return rect
+
+def display_txt(surface, value, size, color, pos, anchor="topleft"):
+    image = display_font(size).render(str(value), True, color)
+    rect = image.get_rect()
+    setattr(rect, anchor, pos)
+    surface.blit(image, rect)
+    return rect
+
+def draw_starfleet_delta(surface, rect):
+    """Draw a compact original vector homage to the classic command delta."""
+    x, y, w, h = rect
+    outer = ((x + w * .50, y), (x + w * .91, y + h * .95),
+             (x + w * .53, y + h * .73), (x + w * .10, y + h * .95))
+    pygame.draw.polygon(surface, (212, 176, 72), outer)
+    inner = ((x + w * .50, y + h * .13), (x + w * .77, y + h * .78),
+             (x + w * .52, y + h * .63), (x + w * .25, y + h * .79))
+    pygame.draw.polygon(surface, (7, 14, 20), inner)
+    pygame.draw.lines(surface, (255, 226, 129), True, outer, max(2, int(w * .04)))
+    star = (x + w * .49, y + h * .41)
+    flare = ((star[0], star[1] - h * .09), (star[0] + w * .035, star[1] - h * .025),
+             (star[0] + w * .11, star[1]), (star[0] + w * .035, star[1] + h * .025),
+             (star[0], star[1] + h * .10), (star[0] - w * .035, star[1] + h * .025),
+             (star[0] - w * .11, star[1]), (star[0] - w * .035, star[1] - h * .025))
+    pygame.draw.polygon(surface, CREAM, flare)
 
 def panel(surface, rect, color=PANEL, border=BLUE, radius=18):
     pygame.draw.rect(surface, color, rect, border_radius=radius)
@@ -815,7 +853,7 @@ def house_pager_layout(size):
     gap, margin = int(w * .012), int(w * .018)
     content_x = r["mode_selector"].right + gap
     content_w = w - margin - content_x
-    grid_w = int(content_w * .63)
+    grid_w = int(content_w * .70)
     y = status_nav_layout(size)["NETWORK"].y - int(h * .047)
     return {
         "PREVIOUS": pygame.Rect(content_x + 18, y, int(w * .085), int(h * .035)),
@@ -908,8 +946,13 @@ def draw_console(surface, now):
     r, w, h = layout(surface.get_size()), *surface.get_size()
     surface.fill(RED if now < flash_until else BLACK)
     panel(surface, r["header"], NAVY, CYAN)
-    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED, (r["header"].x + 24, r["header"].y + 15), bold=True)
-    txt(surface, "TRANSPORTER CONTROL", h * .047, WHITE, (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
+    display_txt(surface, "STARFLEET TRANSPORT COMMAND  •  NCC-1701", h * .017,
+                MUTED, (r["header"].x + 24, r["header"].y + 16))
+    display_txt(surface, "TRANSPORTER CONTROL", h * .043, WHITE,
+                (r["header"].x + 24, r["header"].bottom - 15), "bottomleft")
+    emblem = pygame.Rect(r["header"].right - int(w * .285), r["header"].y + 11,
+                         int(h * .066), int(h * .090))
+    draw_starfleet_delta(surface, emblem)
     lamp = GREEN if ui_state in ("READY", "COMPLETE") else RED if ui_state in ("DESTRUCT", "DESTROYED") else AMBER
     pygame.draw.circle(surface, lamp, (r["header"].right - 38, r["header"].centery), 14)
     txt(surface, ui_state, h * .03, lamp, (r["header"].right - 66, r["header"].centery), "midright", True)
@@ -1592,8 +1635,12 @@ def draw_environment_status(surface, now, data):
         h * .012, state_color, (door_panel.centerx, door_panel.bottom - 16), "midbottom", True)
     draw_status_nav(surface)
 
-HOUSE_GROUP_ORDER = ("BACK YARD", "BAR", "BREAKFAST NOOK", "COUCH", "DINING ROOM",
-                     "FAMILY ROOM", "FENCE", "GARAGE REFRIGERATOR", "HALLWAY", "PATIO")
+HOUSE_GROUP_ORDER = ("BAR", "BREAKFAST NOOK", "COUCH", "DINING ROOM",
+                     "FAMILY ROOM", "GARAGE REFRIGERATOR", "HALLWAY", "FENCE 1",
+                     "PATIO 1", "PATIO 2", "PATIO 3", "PATIO AUDIO",
+                     "BASEMENT SONOS", "GARAGE SONOS", "KITCHEN SONOS",
+                     "LIVING ROOM SONOS", "MAIN BEDROOM SONOS", "OFFICE SONOS",
+                     "EXERCISE ROOM BOSE")
 
 def grouped_house_systems(data):
     grouped = {name: [] for name in HOUSE_GROUP_ORDER}
@@ -1604,23 +1651,31 @@ def grouped_house_systems(data):
 
 def house_group_lines(devices):
     switches = [item.get("switch") for item in devices if item.get("switch") in ("on", "off")]
-    playing = [item for item in devices if item.get("playbackStatus")]
+    playing = [item for item in devices if str(item.get("playbackStatus", "")).lower() == "playing"]
     water = [item.get("water") for item in devices if item.get("water")]
     temperatures = [item.get("temperature") for item in devices if item.get("temperature") is not None]
     online = [item.get("DeviceWatch-DeviceStatus") for item in devices
               if item.get("DeviceWatch-DeviceStatus")]
     lines = []
-    if switches:
-        lines.append(f"{sum(value == 'on' for value in switches)} ON  /  {len(switches)} CONTROLS")
     if playing:
         audio = playing[0]
-        volume = audio.get("volume", audio.get("groupVolume"))
-        lines.append(f"AUDIO {str(audio.get('playbackStatus')).upper()}  •  VOL {volume if volume is not None else '—'}")
+        track = audio.get("audioTrackData")
+        if isinstance(track, dict) and track.get("title"):
+            source = str(track.get("mediaSource") or "SONOS").upper()
+            lines.append(f"NOW PLAYING  •  {source}")
+            lines.append(str(track["title"]).upper()[:30])
+            if track.get("artist"):
+                lines.append(str(track["artist"]).upper()[:30])
+        else:
+            volume = audio.get("volume", audio.get("groupVolume"))
+            lines.append(f"SONOS PLAYING  •  VOL {volume if volume is not None else '—'}")
+    elif switches:
+        lines.append(f"{sum(value == 'on' for value in switches)} ON  /  {len(switches)} CONTROLS")
     if water:
         lines.append("WATER " + " / ".join(str(value).upper() for value in water))
     if temperatures:
         lines.append(f"THERMAL {float(temperatures[0]):.1f} °F")
-    if online:
+    if online and len(lines) < 3:
         lines.append(f"LINK {sum(value == 'online' for value in online)}/{len(online)} ONLINE")
     if not lines:
         lines.append("NO USABLE CAPABILITY DATA")
@@ -1635,18 +1690,21 @@ def draw_house_card(surface, rect, group, devices):
     panel(surface, rect, (8, 16, 17), BEZEL, 5)
     pygame.draw.circle(surface, BEZEL, (rect.x + 18, rect.y + 20), 9)
     pygame.draw.circle(surface, color, (rect.x + 18, rect.y + 20), 5)
-    txt(surface, group, rect.h * .15, CREAM, (rect.x + 35, rect.y + 10), bold=True)
-    txt(surface, compact_age(updated), rect.h * .095, color, (rect.right - 12, rect.y + 12), "topright", True)
-    line_y = rect.y + int(rect.h * .43)
+    title_scale = .080 if len(group) > 16 else .095 if len(group) > 12 else .125
+    txt(surface, group, rect.h * title_scale, CREAM, (rect.x + 35, rect.y + 10), bold=True)
+    txt(surface, compact_age(updated), rect.h * .065, color,
+        (rect.right - 10, rect.bottom - 8), "bottomright", True)
+    line_y = rect.y + int(rect.h * .42)
     for index, line in enumerate(lines):
-        txt(surface, line, rect.h * (.14 if index == 0 else .105), WHITE if index == 0 else MUTED,
-            (rect.x + 15, line_y + index * int(rect.h * .20)), "midleft", index == 0)
+        first_scale = .065 if len(line) > 22 else .085 if len(line) > 18 else .105
+        txt(surface, line, rect.h * (first_scale if index == 0 else .080), WHITE if index == 0 else MUTED,
+            (rect.x + 13, line_y + index * int(rect.h * .19)), "midleft", index == 0)
 
 def draw_reservoir_scale(surface, rect, lake):
     panel(surface, rect, (6, 13, 15), BEZEL, 5)
     txt(surface, "LEWISVILLE RESERVOIR", rect.h * .055, CREAM, (rect.x + 16, rect.y + 12), bold=True)
     txt(surface, f"USGS PROV • {compact_age(lake.get('updated'))}", rect.h * .030, MUTED,
-        (rect.right - 14, rect.y + 14), "topright", True)
+        (rect.x + 16, rect.y + int(rect.h * .11)), "topleft", True)
     elevation = lake.get("elevation_ft")
     fault = lake.get("error") or elevation is None
     txt(surface, f"{elevation:06.2f} FT" if elevation is not None else "DATA LINK FAULT",
@@ -1707,23 +1765,24 @@ def draw_house_status(surface, now, data):
     body_h = status_nav_layout(surface.get_size())["NETWORK"].y - body_y - gap
     content_x = r["mode_selector"].right + gap
     content_w = w - margin - content_x
-    grid_w = int(content_w * .63)
+    grid_w = int(content_w * .70)
     grid = pygame.Rect(content_x, body_y, grid_w, body_h)
     water_panel = pygame.Rect(grid.right + gap, body_y, content_w - grid_w - gap, body_h)
     panel(surface, grid, PANEL, BLUE, 10)
     txt(surface, "SELECTED HABITATION SYSTEMS", h * .024, CREAM,
         (grid.x + 18, grid.y + 14), bold=True)
     groups = grouped_house_systems(data)
-    page_size, page_count = 6, max(1, math.ceil(len(groups) / 6))
+    page_size, page_count = 12, max(1, math.ceil(len(groups) / 12))
     active_page = min(house_system_page, page_count - 1)
     shown = groups[active_page * page_size:(active_page + 1) * page_size]
     card_gap, top = 12, grid.y + 58
-    card_w = (grid.w - 36 - card_gap) // 2
+    columns, rows = 4, 3
+    card_w = (grid.w - 36 - card_gap * (columns - 1)) // columns
     pager = house_pager_layout(surface.get_size())
     cards_bottom = pager["PREVIOUS"].y - 8 if page_count > 1 else grid.bottom - 18
-    card_h = (cards_bottom - top - card_gap * 2) // 3
+    card_h = (cards_bottom - top - card_gap * (rows - 1)) // rows
     for index, (group, devices) in enumerate(shown):
-        col, row = index % 2, index // 2
+        col, row = index % columns, index // columns
         draw_house_card(surface, pygame.Rect(grid.x + 18 + col * (card_w + card_gap),
                                              top + row * (card_h + card_gap), card_w, card_h),
                         group, devices)
@@ -1741,17 +1800,17 @@ def draw_house_status(surface, now, data):
     txt(surface, "WATER RESOURCES", h * .024, CREAM,
         (water_panel.x + 18, water_panel.y + 14), bold=True)
     water = data.get("water", {})
-    lake_rect = pygame.Rect(water_panel.x + 16, water_panel.y + 54,
-                            water_panel.w - 32, int(water_panel.h * .53))
+    lake_rect = pygame.Rect(water_panel.x + 14, water_panel.y + 50,
+                            water_panel.w - 28, int(water_panel.h * .49))
     draw_reservoir_scale(surface, lake_rect, water.get("lake", {}))
     trinity = water.get("trinity", {})
-    river_rect = pygame.Rect(water_panel.x + 16, lake_rect.bottom + 14,
-                             water_panel.w - 32, water_panel.bottom - lake_rect.bottom - 30)
+    river_rect = pygame.Rect(water_panel.x + 14, lake_rect.bottom + 12,
+                             water_panel.w - 28, water_panel.bottom - lake_rect.bottom - 26)
     panel(surface, river_rect, (6, 13, 15), BEZEL, 5)
     txt(surface, "TRINITY OUTFLOW", river_rect.h * .11, CREAM,
         (river_rect.x + 15, river_rect.y + 11), bold=True)
-    txt(surface, f"USGS PROV • {compact_age(trinity.get('updated'))}", river_rect.h * .055, MUTED,
-        (river_rect.right - 14, river_rect.y + 14), "topright", True)
+    txt(surface, f"USGS PROV • {compact_age(trinity.get('updated'))}", river_rect.h * .050, MUTED,
+        (river_rect.x + 15, river_rect.y + int(river_rect.h * .15)), "topleft", True)
     flow = trinity.get("flow_cfs")
     gage = trinity.get("gage_ft")
     if flow is not None:

@@ -1,16 +1,48 @@
 import os
 import json
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from office_telemetry import (TelemetryService, _smartthings_summary,
+from office_telemetry import (TelemetryService, _smartthings_access_token,
+                              _smartthings_rest_summary, _smartthings_summary,
                               _tempest_cloud_summary, _water_summary)
 
 
 class LocalTelemetryParsingTests(unittest.TestCase):
+    def test_smartthings_oauth_keeps_fresh_access_token(self):
+        config = {"auth_type": "oauth", "access_token": "fresh",
+                  "refresh_token": "refresh", "client_id": "id",
+                  "client_secret": "secret", "expires_at": 10000}
+        with mock.patch("office_telemetry.urllib.request.urlopen") as urlopen:
+            self.assertEqual(_smartthings_access_token(config, "/missing", now=100), "fresh")
+            urlopen.assert_not_called()
+
+    def test_smartthings_oauth_rotates_and_persists_refresh_token(self):
+        config = {"auth_type": "oauth", "enabled": True, "access_token": "old-access",
+                  "refresh_token": "old-refresh", "client_id": "id",
+                  "client_secret": "secret", "expires_at": 1}
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        response.read.return_value = json.dumps({
+            "access_token": "new-access", "refresh_token": "new-refresh",
+            "expires_in": 86400}).encode()
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "smartthings.json")
+            with mock.patch("office_telemetry.urllib.request.urlopen", return_value=response):
+                token = _smartthings_access_token(config, path, now=100)
+            self.assertEqual(token, "new-access")
+            with open(path, encoding="utf-8") as config_file:
+                saved = json.load(config_file)
+            self.assertEqual(saved["refresh_token"], "new-refresh")
+            self.assertEqual(saved["expires_at"], 86500)
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
     def test_smartthings_switch_and_level(self):
         payload = [
             {"switch": {"value": "on", "timestamp": "2026-10-05T20:00:00Z"}},
@@ -34,6 +66,37 @@ class LocalTelemetryParsingTests(unittest.TestCase):
         battery = snapshot["house"]["batteries"]["Attic AC Overflow"]
         self.assertEqual(battery["level_pct"], 22)
         self.assertEqual(battery["value_text"], "22%")
+
+    def test_smartthings_rest_status_normalizes_capabilities_and_celsius(self):
+        payload = {"components": {"main": {
+            "switch": {"switch": {"value": "on", "timestamp": "2026-10-07T20:00:00Z"}},
+            "temperatureMeasurement": {"temperature": {
+                "value": 20, "unit": "C", "timestamp": "2026-10-07T20:00:01Z"}},
+            "waterSensor": {"water": {
+                "value": "dry", "timestamp": "2026-10-07T20:00:02Z"}},
+            "battery": {"battery": {
+                "value": 72, "unit": "%", "timestamp": "2026-10-07T20:00:03Z"}},
+        }}}
+        result = _smartthings_rest_summary(payload)
+        self.assertEqual(result["switch"], "on")
+        self.assertAlmostEqual(result["temperature"], 68)
+        self.assertEqual(result["temperature_unit"], "F")
+        self.assertEqual(result["water"], "dry")
+        self.assertEqual(result["battery"], 72)
+        self.assertEqual(result["DeviceWatch-DeviceStatus"], "online")
+
+    def test_smartthings_rest_status_preserves_sonos_track_metadata(self):
+        track = {"title": "Sweet Caroline", "artist": "Neil Diamond",
+                 "mediaSource": "Spotify"}
+        payload = {"components": {"main": {
+            "mediaPlayback": {"playbackStatus": {
+                "value": "playing", "timestamp": "2026-10-08T02:00:00Z"}},
+            "audioTrackData": {"audioTrackData": {
+                "value": track, "timestamp": "2026-10-08T02:00:01Z"}},
+        }}}
+        result = _smartthings_rest_summary(payload)
+        self.assertEqual(result["playbackStatus"], "playing")
+        self.assertEqual(result["audioTrackData"], track)
 
     def test_usgs_lake_elevation_code(self):
         payload = {"value": {"timeSeries": [{

@@ -4,13 +4,14 @@ A full-screen, touch-first sci-fi transporter console built for a Halloween part
 
 Designed and built by Greg Gorman with Max (OpenAI Codex).
 
-![Transporter console running at 1920×1080](assets/console-screenshot.png)
+![Transporter console with Starfleet masthead running at 1920×1080](assets/transporter-starfleet-screenshot.png)
 
 ![Space Traffic with live satellites, planets, stars, and predicted passes](assets/space-traffic-screenshot.png)
 
 ## Features
 
 - Large touchscreen **ENERGIZE** control with animated transporter sequence
+- Starfleet-style vector delta and wide sci-fi masthead on the transporter page
 - Ten-second synchronized transport cycle with a gentle audio fade at completion
 - Protected two-touch **SELF DESTRUCT** control
 - Spoken ten-second countdown, siren, explosion, and five-press abort sequence
@@ -121,14 +122,45 @@ shutter across the affected dial, edge meter, or readout. Valid caution and
 alarm states remain visible normally; the shutter indicates missing telemetry,
 not merely an unfavorable measurement.
 
-The `POWER CELLS` page automatically inventories every retained SmartThings
+The `POWER CELLS` page automatically inventories every selected SmartThings
 device with a battery capability, all supported YoLink sensors, and the Tempest
 station battery voltage. It sorts critical and low cells first, distinguishes
 old/offline reports from genuinely low readings, and shows both battery-report
-age and overall device-activity age. SmartThings discovery uses the local
-`smartthings/#` MQTT tree; no cloud credentials are stored by the kiosk.
+age and overall device-activity age.
 
-`WATER RECLAMATION` monitors seven named SmartThings water sensors, including
+### SmartThings status
+
+The preferred SmartThings source is the official read-only REST API. Copy the
+private configuration template on the Pi:
+
+```bash
+install -m 600 startrek-smartthings.example.json ~/.config/startrek-smartthings.json
+```
+
+The unattended console uses a read-only SmartThings OAuth installation with
+device and location read scopes. Put the private client, access, and refresh
+credentials in that file and change `enabled` to `true`. The telemetry service
+refreshes the access token an hour before expiry and atomically persists both
+new tokens with mode `0600`; SmartThings refresh tokens rotate and must never be
+reused. Do not commit this private file or paste its credentials into logs or
+issue reports. A temporary Personal Access Token may still be placed in the
+legacy `token` field for short discovery sessions, but PATs expire and are not
+suitable for the kiosk.
+
+To verify names and capabilities without printing the token:
+
+```bash
+python3 smartthings_inventory.py
+```
+
+`office_telemetry.py` matches the selected device labels, polls their full
+status in the background, converts Celsius readings to Fahrenheit for the
+console, and feeds the existing House Systems, leak, garage-door, climate, and
+battery displays. The old local `smartthings/#` MQTT feed remains an automatic
+fallback while the REST path is being commissioned; fresh API data takes
+priority over retained MQTT messages.
+
+`WATER RECLAMATION` monitors six named SmartThings water sensors, including
 the Attic AC Overflow device. Its red-and-white shutter means no sufficiently
 recent dry/wet report is available; it never means that a leak was inferred.
 
@@ -251,12 +283,21 @@ nothing; raw topic discovery is not exposed on the party UI.
 ![House Systems page with Lewisville Reservoir and Trinity outflow](assets/house-systems-screenshot.png)
 
 The **HOUSE SYSTEMS** page groups Greg's selected retained SmartThings topics
-into Back Yard, Bar, Breakfast Nook, Couch, Dining Room, Family Room, Fence,
-Garage Refrigerator, Hallway, and Patio panels. It extracts only useful status
+into Bar, Breakfast Nook, Couch, Dining Room, Family Room, Garage Refrigerator,
+Hallway, Fence 1, individual Patio 1–3 controls, and Patio Audio panels. It extracts only useful status
 capabilities such as switch state, dimmer level, audio playback/volume, device
 health, temperature, and water state. Old retained values retain their actual
 report age instead of being presented as fresh observations. The page is
-read-only and paginates six groups at a time.
+read-only and presents up to twelve compact system groups per page alongside
+compact Lewisville Reservoir and Trinity outflow instruments.
+
+SmartThings-backed Sonos rooms display **NOW PLAYING**, source, track, and artist
+only while playback is active. Paused historical metadata is deliberately hidden
+so an old track is never presented as current audio. The monitored Sonos zones
+are Basement, Dining Room, Family Room, Garage, Kitchen, Living Room, Main
+Bedroom, Office, and Patio. CineMate is identified separately as the Bose unit
+in the Exercise Room; Patio Speakers is the switched power endpoint feeding the
+Patio Sonos Port rather than a separate player.
 
 Water Resources polls the primary USGS feeds directly every 15 minutes in a
 background worker, while retaining the existing MQTT topics as fallback:
@@ -273,8 +314,9 @@ shown as `DATA LINK FAULT`; a previously valid measurement remains explicitly
 qualified as `LAST VALID` rather than being replaced with zero.
 
 Copy `startrek.py`, `office_telemetry.py`, `yolink_telemetry.py`,
-`flight_telemetry.py`, `satellite_telemetry.py`, and your audio files into one
-directory, then run:
+`flight_telemetry.py`, `satellite_telemetry.py`, `smartthings_inventory.py`,
+the example configuration files, and your audio files into one directory, then
+run:
 
 ```bash
 python3 startrek.py --test
@@ -422,5 +464,12 @@ console is a quiet signature from that collaboration.
 ## License and attribution
 
 The original code is released under the MIT License.
+
+The bundled [Michroma](assets/fonts/Michroma-Regular.ttf) display font is
+Copyright 2011 The Michroma Project Authors and is distributed under the SIL
+Open Font License 1.1; its license is included at
+[`assets/fonts/Michroma-OFL.txt`](assets/fonts/Michroma-OFL.txt). It is used for
+the transporter masthead while operational instruments retain DejaVu Sans for
+readability.
 
 This is an unofficial fan-made project inspired by classic science-fiction control panels. *Star Trek* and related names and marks belong to their respective owners. No affiliation or endorsement is claimed. Audio from the television programs or films is not distributed here.

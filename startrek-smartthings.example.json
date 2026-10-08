@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "auth_type": "oauth",
+  "client_id": "PRIVATE_OAUTH_CLIENT_ID",
+  "client_secret": "PRIVATE_OAUTH_CLIENT_SECRET",
+  "access_token": "PRIVATE_INITIAL_ACCESS_TOKEN",
+  "refresh_token": "PRIVATE_ROTATING_REFRESH_TOKEN",
+  "expires_at": 0,
+  "installed_app_id": "PRIVATE_INSTALLED_APP_ID",
+  "location_id": "",
+  "poll_seconds": 300
+}
