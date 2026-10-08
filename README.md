@@ -137,12 +137,15 @@ private configuration template on the Pi:
 install -m 600 startrek-smartthings.example.json ~/.config/startrek-smartthings.json
 ```
 
-Generate a temporary Personal Access Token at
-`https://account.smartthings.com/tokens` with device and location read scopes,
-place it in the private file, and change `enabled` to `true`. Do not commit the
-private file or paste its token into logs or issue reports. Current SmartThings
-PATs are short-lived and are intended for discovery and testing; unattended
-operation should ultimately use OAuth access and refresh tokens.
+The unattended console uses a read-only SmartThings OAuth installation with
+device and location read scopes. Put the private client, access, and refresh
+credentials in that file and change `enabled` to `true`. The telemetry service
+refreshes the access token an hour before expiry and atomically persists both
+new tokens with mode `0600`; SmartThings refresh tokens rotate and must never be
+reused. Do not commit this private file or paste its credentials into logs or
+issue reports. A temporary Personal Access Token may still be placed in the
+legacy `token` field for short discovery sessions, but PATs expire and are not
+suitable for the kiosk.
 
 To verify names and capabilities without printing the token:
 

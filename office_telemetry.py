@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import collections
 import copy
 import datetime as dt
@@ -29,7 +30,9 @@ MQTT_HOST = "snoop433.local"
 MQTT_PORT = 1883
 SMARTTHINGS_CONFIG = os.path.expanduser("~/.config/startrek-smartthings.json")
 SMARTTHINGS_API = "https://api.smartthings.com/v1"
+SMARTTHINGS_TOKEN_URL = "https://api.smartthings.com/v1/oauth/token"
 SMARTTHINGS_DEFAULT_POLL_SECONDS = 300
+_smartthings_refresh_lock = threading.Lock()
 WEATHERFLOW_PORT = 50222
 TEMPEST_CONFIG = os.path.expanduser("~/.config/startrek-tempest.json")
 TEMPEST_REFRESH_SECONDS = 60
@@ -209,6 +212,76 @@ def _smartthings_api_json(path, token, query=None, timeout=12):
     })
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
+
+
+def _write_smartthings_config(config, path=SMARTTHINGS_CONFIG):
+    """Atomically persist rotated OAuth credentials with owner-only access."""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    temporary = f"{path}.tmp-{os.getpid()}"
+    try:
+        with open(temporary, "w", encoding="utf-8") as config_file:
+            json.dump(config, config_file, indent=2)
+            config_file.write("\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def _smartthings_access_token(config, path=SMARTTHINGS_CONFIG, now=None):
+    """Return a valid token, refreshing OAuth credentials before expiry."""
+    token = str(config.get("access_token") or config.get("token") or "").strip()
+    if str(config.get("auth_type", "")).lower() != "oauth":
+        return token
+    required = ("client_id", "client_secret", "refresh_token")
+    if not all(str(config.get(key, "")).strip() for key in required):
+        return token
+    now = time.time() if now is None else now
+    if float(config.get("expires_at") or 0) > now + 3600:
+        return token
+    with _smartthings_refresh_lock:
+        try:
+            with open(path, encoding="utf-8") as config_file:
+                latest = json.load(config_file)
+        except (FileNotFoundError, OSError, ValueError):
+            latest = dict(config)
+        token = str(latest.get("access_token") or latest.get("token") or "").strip()
+        if float(latest.get("expires_at") or 0) > now + 3600:
+            config.clear()
+            config.update(latest)
+            return token
+        credentials = f"{latest['client_id']}:{latest['client_secret']}".encode("utf-8")
+        body = urllib.parse.urlencode({
+            "grant_type": "refresh_token",
+            "refresh_token": latest["refresh_token"],
+            "client_id": latest["client_id"],
+        }).encode("ascii")
+        request = urllib.request.Request(SMARTTHINGS_TOKEN_URL, data=body, headers={
+            "Accept": "application/json",
+            "Authorization": "Basic " + base64.b64encode(credentials).decode("ascii"),
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "startrek-console/1.0",
+        })
+        with urllib.request.urlopen(request, timeout=15) as response:
+            refreshed = json.load(response)
+        if not refreshed.get("access_token") or not refreshed.get("refresh_token"):
+            raise ValueError("SmartThings token refresh returned incomplete credentials")
+        latest.update({
+            "access_token": refreshed["access_token"],
+            "refresh_token": refreshed["refresh_token"],
+            "expires_at": now + int(refreshed.get("expires_in", 86400)),
+        })
+        if refreshed.get("installed_app_id"):
+            latest["installed_app_id"] = refreshed["installed_app_id"]
+        latest.pop("token", None)
+        _write_smartthings_config(latest, path)
+        config.clear()
+        config.update(latest)
+        return latest["access_token"]
 
 
 def _walk_mapping(value):
@@ -632,8 +705,7 @@ class TelemetryService:
                     self._data["smartthings"].update(connected=False, error=str(exc))
                 self._stop.wait(30)
                 continue
-            token = str(config.get("token") or config.get("access_token") or "").strip()
-            if not config.get("enabled") or not token:
+            if not config.get("enabled"):
                 with self._lock:
                     self._data["smartthings"].update(
                         connected=False, error="NOT CONFIGURED")
@@ -642,6 +714,9 @@ class TelemetryService:
             poll_seconds = max(60, int(config.get(
                 "poll_seconds", SMARTTHINGS_DEFAULT_POLL_SECONDS)))
             try:
+                token = _smartthings_access_token(config)
+                if not token:
+                    raise ValueError("SmartThings access token is missing")
                 query = {"locationId": config["location_id"]} if config.get("location_id") else None
                 devices = _smartthings_api_json("/devices", token, query).get("items", [])
                 selected = []
