@@ -47,6 +47,8 @@ HOUSE_TOPICS = (
     "smartthings/Keg",
     "smartthings/L garage door",
     "smartthings/R garage door",
+    "smartthings/Basement",
+    "smartthings/CineMate",
     "smartthings/Upstairs Water Heater Leak",
     "smartthings/Bar Sink Leak",
     "smartthings/kitchen Sink Leak",
@@ -70,8 +72,13 @@ HOUSE_TOPICS = (
     "smartthings/Family Room Fireplace Light",
     "smartthings/Family Room Overhead",
     "smartthings/Fence 1",
+    "smartthings/Garage",
     "smartthings/Garage Refrigerator",
     "smartthings/Hallway Overhead",
+    "smartthings/Kitchen",
+    "smartthings/Living Room",
+    "smartthings/Main Bedroom",
+    "smartthings/Office",
     "smartthings/Patio",
     "smartthings/Patio Lights 1",
     "smartthings/Patio Lights 2",
@@ -90,6 +97,7 @@ LEAK_TOPICS = {
 LEAK_NAMES = {topic.split("/", 1)[1] for topic in LEAK_TOPICS}
 
 SYSTEM_GROUPS = {
+    "Basement": "BASEMENT SONOS", "CineMate": "EXERCISE ROOM BOSE",
     "Bar Front": "BAR", "Bar Overhead": "BAR", "Bar Signs": "BAR",
     "Bar Sink Leak": "BAR",
     "Breakfast Nook": "BREAKFAST NOOK",
@@ -99,8 +107,11 @@ SYSTEM_GROUPS = {
     "Family Room": "FAMILY ROOM", "Family Room Fan Light": "FAMILY ROOM",
     "Family Room Fan Motor": "FAMILY ROOM", "Family Room Fireplace Light": "FAMILY ROOM",
     "Family Room Overhead": "FAMILY ROOM",
-    "Fence 1": "FENCE 1", "Garage Refrigerator": "GARAGE REFRIGERATOR",
+    "Fence 1": "FENCE 1", "Garage": "GARAGE SONOS",
+    "Garage Refrigerator": "GARAGE REFRIGERATOR",
     "Hallway Overhead": "HALLWAY", "Patio": "PATIO AUDIO",
+    "Kitchen": "KITCHEN SONOS", "Living Room": "LIVING ROOM SONOS",
+    "Main Bedroom": "MAIN BEDROOM SONOS", "Office": "OFFICE SONOS",
     "Patio Lights 1": "PATIO 1", "Patio Lights 2": "PATIO 2",
     "Patio Lights 3": "PATIO 3", "Patio Speakers": "PATIO AUDIO",
 }

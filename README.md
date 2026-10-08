@@ -290,7 +290,11 @@ Reservoir and Trinity outflow instruments.
 
 SmartThings-backed Sonos rooms display **NOW PLAYING**, source, track, and artist
 only while playback is active. Paused historical metadata is deliberately hidden
-so an old track is never presented as current audio.
+so an old track is never presented as current audio. The monitored Sonos zones
+are Basement, Dining Room, Family Room, Garage, Kitchen, Living Room, Main
+Bedroom, Office, and Patio. CineMate is identified separately as the Bose unit
+in the Exercise Room; Patio Speakers is the switched power endpoint feeding the
+Patio Sonos Port rather than a separate player.
 
 Water Resources polls the primary USGS feeds directly every 15 minutes in a
 background worker, while retaining the existing MQTT topics as fallback:

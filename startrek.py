@@ -1637,7 +1637,10 @@ def draw_environment_status(surface, now, data):
 
 HOUSE_GROUP_ORDER = ("BAR", "BREAKFAST NOOK", "COUCH", "DINING ROOM",
                      "FAMILY ROOM", "GARAGE REFRIGERATOR", "HALLWAY", "FENCE 1",
-                     "PATIO 1", "PATIO 2", "PATIO 3", "PATIO AUDIO")
+                     "PATIO 1", "PATIO 2", "PATIO 3", "PATIO AUDIO",
+                     "BASEMENT SONOS", "GARAGE SONOS", "KITCHEN SONOS",
+                     "LIVING ROOM SONOS", "MAIN BEDROOM SONOS", "OFFICE SONOS",
+                     "EXERCISE ROOM BOSE")
 
 def grouped_house_systems(data):
     grouped = {name: [] for name in HOUSE_GROUP_ORDER}
