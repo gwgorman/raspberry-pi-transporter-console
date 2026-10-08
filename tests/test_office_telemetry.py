@@ -53,6 +53,19 @@ class LocalTelemetryParsingTests(unittest.TestCase):
         self.assertEqual(result["battery"], 72)
         self.assertEqual(result["DeviceWatch-DeviceStatus"], "online")
 
+    def test_smartthings_rest_status_preserves_sonos_track_metadata(self):
+        track = {"title": "Sweet Caroline", "artist": "Neil Diamond",
+                 "mediaSource": "Spotify"}
+        payload = {"components": {"main": {
+            "mediaPlayback": {"playbackStatus": {
+                "value": "playing", "timestamp": "2026-10-08T02:00:00Z"}},
+            "audioTrackData": {"audioTrackData": {
+                "value": track, "timestamp": "2026-10-08T02:00:01Z"}},
+        }}}
+        result = _smartthings_rest_summary(payload)
+        self.assertEqual(result["playbackStatus"], "playing")
+        self.assertEqual(result["audioTrackData"], track)
+
     def test_usgs_lake_elevation_code(self):
         payload = {"value": {"timeSeries": [{
             "variable": {"variableCode": [{"value": "62614"}]},

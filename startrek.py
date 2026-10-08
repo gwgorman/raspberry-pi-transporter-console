@@ -1648,23 +1648,31 @@ def grouped_house_systems(data):
 
 def house_group_lines(devices):
     switches = [item.get("switch") for item in devices if item.get("switch") in ("on", "off")]
-    playing = [item for item in devices if item.get("playbackStatus")]
+    playing = [item for item in devices if str(item.get("playbackStatus", "")).lower() == "playing"]
     water = [item.get("water") for item in devices if item.get("water")]
     temperatures = [item.get("temperature") for item in devices if item.get("temperature") is not None]
     online = [item.get("DeviceWatch-DeviceStatus") for item in devices
               if item.get("DeviceWatch-DeviceStatus")]
     lines = []
-    if switches:
-        lines.append(f"{sum(value == 'on' for value in switches)} ON  /  {len(switches)} CONTROLS")
     if playing:
         audio = playing[0]
-        volume = audio.get("volume", audio.get("groupVolume"))
-        lines.append(f"AUDIO {str(audio.get('playbackStatus')).upper()}  •  VOL {volume if volume is not None else '—'}")
+        track = audio.get("audioTrackData")
+        if isinstance(track, dict) and track.get("title"):
+            source = str(track.get("mediaSource") or "SONOS").upper()
+            lines.append(f"NOW PLAYING  •  {source}")
+            lines.append(str(track["title"]).upper()[:30])
+            if track.get("artist"):
+                lines.append(str(track["artist"]).upper()[:30])
+        else:
+            volume = audio.get("volume", audio.get("groupVolume"))
+            lines.append(f"SONOS PLAYING  •  VOL {volume if volume is not None else '—'}")
+    elif switches:
+        lines.append(f"{sum(value == 'on' for value in switches)} ON  /  {len(switches)} CONTROLS")
     if water:
         lines.append("WATER " + " / ".join(str(value).upper() for value in water))
     if temperatures:
         lines.append(f"THERMAL {float(temperatures[0]):.1f} °F")
-    if online:
+    if online and len(lines) < 3:
         lines.append(f"LINK {sum(value == 'online' for value in online)}/{len(online)} ONLINE")
     if not lines:
         lines.append("NO USABLE CAPABILITY DATA")

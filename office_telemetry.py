@@ -131,7 +131,7 @@ def _capability(payload, name):
 def _smartthings_summary(payload):
     """Extract only display-safe capability values from a retained device payload."""
     summary = {}
-    for capability in ("switch", "level", "playbackStatus", "volume", "groupVolume",
+    for capability in ("switch", "level", "playbackStatus", "audioTrackData", "volume", "groupVolume",
                        "mute", "contact", "temperature", "humidity", "water", "battery",
                        "DeviceWatch-DeviceStatus"):
         value, stamp, unit = _capability(payload, capability)
@@ -149,6 +149,7 @@ SMARTTHINGS_REST_ATTRIBUTES = {
     "mediaPlayback": ("playbackStatus",),
     "audioVolume": ("volume",),
     "audioMute": ("mute",),
+    "audioTrackData": ("audioTrackData",),
     "contactSensor": ("contact",),
     "temperatureMeasurement": ("temperature",),
     "relativeHumidityMeasurement": ("humidity",),
