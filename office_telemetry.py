@@ -99,10 +99,10 @@ SYSTEM_GROUPS = {
     "Family Room": "FAMILY ROOM", "Family Room Fan Light": "FAMILY ROOM",
     "Family Room Fan Motor": "FAMILY ROOM", "Family Room Fireplace Light": "FAMILY ROOM",
     "Family Room Overhead": "FAMILY ROOM",
-    "Fence 1": "FENCE", "Garage Refrigerator": "GARAGE REFRIGERATOR",
-    "Hallway Overhead": "HALLWAY", "Patio": "PATIO",
-    "Patio Lights 1": "PATIO", "Patio Lights 2": "PATIO",
-    "Patio Lights 3": "PATIO", "Patio Speakers": "PATIO",
+    "Fence 1": "FENCE 1", "Garage Refrigerator": "GARAGE REFRIGERATOR",
+    "Hallway Overhead": "HALLWAY", "Patio": "PATIO AUDIO",
+    "Patio Lights 1": "PATIO 1", "Patio Lights 2": "PATIO 2",
+    "Patio Lights 3": "PATIO 3", "Patio Speakers": "PATIO AUDIO",
 }
 
 

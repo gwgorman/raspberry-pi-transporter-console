@@ -1636,7 +1636,8 @@ def draw_environment_status(surface, now, data):
     draw_status_nav(surface)
 
 HOUSE_GROUP_ORDER = ("BAR", "BREAKFAST NOOK", "COUCH", "DINING ROOM",
-                     "FAMILY ROOM", "FENCE", "GARAGE REFRIGERATOR", "HALLWAY", "PATIO")
+                     "FAMILY ROOM", "GARAGE REFRIGERATOR", "HALLWAY", "FENCE 1",
+                     "PATIO 1", "PATIO 2", "PATIO 3", "PATIO AUDIO")
 
 def grouped_house_systems(data):
     grouped = {name: [] for name in HOUSE_GROUP_ORDER}
@@ -1678,13 +1679,14 @@ def draw_house_card(surface, rect, group, devices):
     panel(surface, rect, (8, 16, 17), BEZEL, 5)
     pygame.draw.circle(surface, BEZEL, (rect.x + 18, rect.y + 20), 9)
     pygame.draw.circle(surface, color, (rect.x + 18, rect.y + 20), 5)
-    title_scale = .10 if len(group) > 16 else .125
+    title_scale = .080 if len(group) > 16 else .095 if len(group) > 12 else .125
     txt(surface, group, rect.h * title_scale, CREAM, (rect.x + 35, rect.y + 10), bold=True)
     txt(surface, compact_age(updated), rect.h * .065, color,
         (rect.right - 10, rect.bottom - 8), "bottomright", True)
     line_y = rect.y + int(rect.h * .42)
     for index, line in enumerate(lines):
-        txt(surface, line, rect.h * (.105 if index == 0 else .080), WHITE if index == 0 else MUTED,
+        first_scale = .065 if len(line) > 22 else .085 if len(line) > 18 else .105
+        txt(surface, line, rect.h * (first_scale if index == 0 else .080), WHITE if index == 0 else MUTED,
             (rect.x + 13, line_y + index * int(rect.h * .19)), "midleft", index == 0)
 
 def draw_reservoir_scale(surface, rect, lake):
@@ -1759,11 +1761,11 @@ def draw_house_status(surface, now, data):
     txt(surface, "SELECTED HABITATION SYSTEMS", h * .024, CREAM,
         (grid.x + 18, grid.y + 14), bold=True)
     groups = grouped_house_systems(data)
-    page_size, page_count = 9, max(1, math.ceil(len(groups) / 9))
+    page_size, page_count = 12, max(1, math.ceil(len(groups) / 12))
     active_page = min(house_system_page, page_count - 1)
     shown = groups[active_page * page_size:(active_page + 1) * page_size]
     card_gap, top = 12, grid.y + 58
-    columns, rows = 3, 3
+    columns, rows = 4, 3
     card_w = (grid.w - 36 - card_gap * (columns - 1)) // columns
     pager = house_pager_layout(surface.get_size())
     cards_bottom = pager["PREVIOUS"].y - 8 if page_count > 1 else grid.bottom - 18

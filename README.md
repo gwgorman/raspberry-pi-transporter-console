@@ -280,12 +280,12 @@ nothing; raw topic discovery is not exposed on the party UI.
 ![House Systems page with Lewisville Reservoir and Trinity outflow](assets/house-systems-screenshot.png)
 
 The **HOUSE SYSTEMS** page groups Greg's selected retained SmartThings topics
-into Bar, Breakfast Nook, Couch, Dining Room, Family Room, Fence,
-Garage Refrigerator, Hallway, and Patio panels. It extracts only useful status
+into Bar, Breakfast Nook, Couch, Dining Room, Family Room, Garage Refrigerator,
+Hallway, Fence 1, individual Patio 1–3 controls, and Patio Audio panels. It extracts only useful status
 capabilities such as switch state, dimmer level, audio playback/volume, device
 health, temperature, and water state. Old retained values retain their actual
 report age instead of being presented as fresh observations. The page is
-read-only and presents nine compact system groups alongside compact Lewisville
+read-only and presents twelve compact system groups alongside compact Lewisville
 Reservoir and Trinity outflow instruments.
 
 Water Resources polls the primary USGS feeds directly every 15 minutes in a
