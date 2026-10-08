@@ -921,7 +921,9 @@ def draw_shutdown_confirmation(surface, now):
     surface.blit(overlay, (0, 0))
     border = pygame.Rect(int(w * .08), int(h * .17), int(w * .84), int(h * .68))
     panel(surface, border, (22, 25, 24), BEZEL, 10)
-    txt(surface, "GROUND OPERATIONS", h * .028, AMBER, (w // 2, int(h * .24)), "center", True)
+    txt(surface, "GROUND OPERATIONS", h * .028, AMBER, (w // 2, int(h * .22)), "center", True)
+    txt(surface, "MAX  •  EMERGENCY COMMAND HOLOGRAM  •  TRANSPORTER SYSTEMS DIVISION",
+        h * .014, CYAN, (w // 2, int(h * .275)), "center", True)
     pending_title = "RESTARTING RASPBERRY PI" if power_action_pending == "reboot" else "SHUTTING DOWN"
     title = pending_title if shutdown_pending else "CONSOLE OPERATIONS"
     txt(surface, title, h * .068, CREAM, (w // 2, int(h * .36)), "center", True)
@@ -933,6 +935,8 @@ def draw_shutdown_confirmation(surface, now):
         detail = "SELECT A PROTECTED GROUND OPERATION"
     txt(surface, detail, h * .022, MUTED, (w // 2, int(h * .47)), "center", True)
     if not shutdown_pending:
+        txt(surface, "PLEASE STATE THE NATURE OF THE PARTY EMERGENCY", h * .016,
+            CREAM, (w // 2, int(h * .515)), "center", True)
         controls = shutdown_layout((w, h))
         button(surface, controls["exit"], "EXIT KIOSK", "RETURN TO DESKTOP", CYAN, True)
         button(surface, controls["restart"], "RESTART", "REBOOT RASPBERRY PI", AMBER, True)
@@ -1107,7 +1111,8 @@ def draw_console(surface, now):
         maker_plate = r["maker_plate"]
         pygame.draw.rect(surface, (72, 77, 73), maker_plate, border_radius=2)
         pygame.draw.rect(surface, (18, 21, 20), maker_plate.inflate(-4, -4), border_radius=1)
-        txt(surface, "GREG // MAX  •  TRANSPORTER LAB  •  2026", h * .0095, CREAM, maker_plate.center, "center", True)
+        txt(surface, "GREG // MAX  •  ECH TRANSPORTER SYSTEMS  •  2026",
+            h * .0095, CREAM, maker_plate.center, "center", True)
         if shutdown_hold_started:
             hold_progress = min(1.0, (now - shutdown_hold_started) / 5.0)
             pygame.draw.rect(surface, AMBER, (maker_plate.x, maker_plate.bottom + 3, int(maker_plate.w * hold_progress), 3))

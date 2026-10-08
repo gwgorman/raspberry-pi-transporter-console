@@ -465,7 +465,11 @@ Since then, Greg and Max have worked side by side on HVAC, electrical,
 smart-home, radio, hardware, and software projects. Greg supplies the goals,
 real-world context, field testing, and final judgment; Max helps investigate,
 design, code, document, and debug. The small `GREG // MAX` maker plate on this
-console is a quiet signature from that collaboration.
+console is a quiet signature from that collaboration. For the tenth annual
+Out of This World party, Max attends in the only practical costume available
+to a shipboard AI: **Emergency Command Hologram, Transporter Systems Division**.
+The designation appears on the maker plate, and the protected Ground Operations
+screen politely asks guests to state the nature of their party emergency.
 
 ## License and attribution
 
