@@ -52,16 +52,12 @@ HOUSE_TOPICS = (
     "smartthings/kitchen Sink Leak",
     "smartthings/Washing Machine Water Leak Sensor",
     "smartthings/Attic AC Overflow",
-    "smartthings/Centralite Water Leak Sensor",
     "smartthings/Ice Maker",
     "LewisvilleLake",
     "TrinityRiver",
-    "smartthings/Back Yard",
     "smartthings/Bar Front",
     "smartthings/Bar Overhead",
     "smartthings/Bar Signs",
-    "smartthings/Bar2",
-    "smartthings/bar1",
     "smartthings/Breakfast Nook",
     "smartthings/Couch 1",
     "smartthings/Couch 2",
@@ -89,15 +85,13 @@ LEAK_TOPICS = {
     "smartthings/kitchen Sink Leak",
     "smartthings/Washing Machine Water Leak Sensor",
     "smartthings/Attic AC Overflow",
-    "smartthings/Centralite Water Leak Sensor",
     "smartthings/Ice Maker",
 }
 LEAK_NAMES = {topic.split("/", 1)[1] for topic in LEAK_TOPICS}
 
 SYSTEM_GROUPS = {
-    "Back Yard": "BACK YARD",
     "Bar Front": "BAR", "Bar Overhead": "BAR", "Bar Signs": "BAR",
-    "Bar Sink Leak": "BAR", "Bar2": "BAR", "bar1": "BAR",
+    "Bar Sink Leak": "BAR",
     "Breakfast Nook": "BREAKFAST NOOK",
     "Couch 1": "COUCH", "Couch 2": "COUCH",
     "Dining Room": "DINING ROOM", "Dining Room Chandelier": "DINING ROOM",

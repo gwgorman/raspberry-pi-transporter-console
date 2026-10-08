@@ -1635,7 +1635,7 @@ def draw_environment_status(surface, now, data):
         h * .012, state_color, (door_panel.centerx, door_panel.bottom - 16), "midbottom", True)
     draw_status_nav(surface)
 
-HOUSE_GROUP_ORDER = ("BACK YARD", "BAR", "BREAKFAST NOOK", "COUCH", "DINING ROOM",
+HOUSE_GROUP_ORDER = ("BAR", "BREAKFAST NOOK", "COUCH", "DINING ROOM",
                      "FAMILY ROOM", "FENCE", "GARAGE REFRIGERATOR", "HALLWAY", "PATIO")
 
 def grouped_house_systems(data):

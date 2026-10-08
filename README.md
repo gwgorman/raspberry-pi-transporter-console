@@ -280,7 +280,7 @@ nothing; raw topic discovery is not exposed on the party UI.
 ![House Systems page with Lewisville Reservoir and Trinity outflow](assets/house-systems-screenshot.png)
 
 The **HOUSE SYSTEMS** page groups Greg's selected retained SmartThings topics
-into Back Yard, Bar, Breakfast Nook, Couch, Dining Room, Family Room, Fence,
+into Bar, Breakfast Nook, Couch, Dining Room, Family Room, Fence,
 Garage Refrigerator, Hallway, and Patio panels. It extracts only useful status
 capabilities such as switch state, dimmer level, audio playback/volume, device
 health, temperature, and water state. Old retained values retain their actual
