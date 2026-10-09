@@ -42,6 +42,8 @@ MODE = "both"
 TEST_MODE = "--test" in sys.argv
 WINDOWED = "--windowed" in sys.argv
 OFFICE_IDLE_SECONDS = 120.0
+PARTY_RETURN_SECONDS = 20.0
+PARTY_OVERRIDE_SECONDS = 300.0
 for arg in sys.argv:
     if arg.startswith("--mode="):
         MODE = arg.split("=", 1)[1].lower()
@@ -64,9 +66,11 @@ abort_count = 0
 ui_state, status_detail = "READY", "PATTERN BUFFER STANDING BY"
 countdown_value = None
 transport_progress = flash_until = arm_until = 0.0
-shutdown_hold_started = shutdown_confirm_until = 0.0
+shutdown_hold_started = shutdown_confirm_until = party_return_hold_started = 0.0
 shutdown_pending = False
 power_action_pending = None
+party_return_enabled = True
+party_return_disabled_until = 0.0
 afg_dragging = False
 afg_value = 72
 afg_pending = None
@@ -192,6 +196,25 @@ def select_display_mode(mode):
     display_mode = mode
     mark_activity()
     save_display_mode()
+
+def party_return_home(now):
+    """Restore a predictable guest-ready console without interrupting effects."""
+    global display_mode, status_page, environment_sensor_page, house_system_page
+    global battery_status_page, radar_range_nm, radar_weather_enabled, selected_aircraft
+    global selected_satellite, satellite_strip_page, arm_until
+    if (any_sequence_active or ui_state != "READY" or shutdown_confirm_until > now or
+            shutdown_pending or countdown_value is not None):
+        return False
+    display_mode, status_page = "TRANSPORTER", "NETWORK"
+    environment_sensor_page = house_system_page = battery_status_page = 0
+    radar_range_nm, radar_weather_enabled = 80, False
+    selected_aircraft = selected_satellite = None
+    satellite_strip_page = 0
+    arm_until = 0
+    if flight_telemetry:
+        flight_telemetry.set_weather_enabled(False)
+    save_display_mode()
+    return True
 
 def ship_status_active(now):
     if (any_sequence_active or ui_state != "READY" or shutdown_confirm_until > now or
@@ -786,6 +809,40 @@ def draw_mode_selector(surface, rect):
         txt(surface, option, rect.w * .071,
             (22, 24, 22) if selected else CREAM,
             (segment.centerx + 5, segment.centery), "center", True)
+    draw_party_return(surface, rect)
+
+def party_return_rect(selector_rect):
+    return pygame.Rect(selector_rect.x, selector_rect.bottom + 14,
+                       selector_rect.w, int(selector_rect.h * .205))
+
+def draw_party_return(surface, selector_rect):
+    """Draw the guarded, self-rearming party-mode home switch."""
+    rect = party_return_rect(selector_rect)
+    panel(surface, rect, (38, 42, 39), BEZEL, 5)
+    inner = rect.inflate(-10, -10)
+    pygame.draw.rect(surface, (10, 14, 13), inner, border_radius=3)
+    txt(surface, "PARTY RETURN", rect.w * .082, CREAM,
+        (rect.centerx, rect.y + 13), "midtop", True)
+    lamp = (rect.x + 22, rect.y + 48)
+    color = GREEN if party_return_enabled else RED
+    pygame.draw.circle(surface, (110, 114, 104), lamp, 10)
+    pygame.draw.circle(surface, (15, 19, 17), lamp, 7)
+    pygame.draw.circle(surface, color, lamp, 5)
+    state = "ARMED" if party_return_enabled else "OVERRIDE"
+    txt(surface, state, rect.w * .084, color, (rect.x + 40, rect.y + 48), "midleft", True)
+    if party_return_enabled:
+        detail = "HOME AFTER 20 SEC"
+    else:
+        remaining = max(0, int(party_return_disabled_until - time.monotonic()) + 1)
+        detail = f"AUTO REARM {remaining // 60}:{remaining % 60:02d}"
+    txt(surface, detail, rect.w * .065, MUTED,
+        (rect.centerx, rect.y + 72), "center", True)
+    txt(surface, "CREW ONLY  •  HOLD 5 SEC", rect.w * .047, AMBER,
+        (rect.centerx, rect.bottom - 15), "center", True)
+    if party_return_hold_started:
+        progress = min(1.0, (time.monotonic() - party_return_hold_started) / 5.0)
+        pygame.draw.rect(surface, AMBER,
+                         (inner.x, inner.bottom - 4, int(inner.w * progress), 3))
 
 def mode_at_position(pos, size):
     rect = layout(size)["mode_selector"]
@@ -798,6 +855,9 @@ def mode_at_position(pos, size):
     row_h = max(30, int((rect.bottom - row_top - 10) / len(options)))
     index = min(len(options) - 1, max(0, int((pos[1] - row_top) / row_h)))
     return options[index]
+
+def party_return_at_position(pos, size):
+    return party_return_rect(layout(size)["mode_selector"]).collidepoint(pos)
 
 def status_nav_layout(size):
     r = layout(size)
@@ -1116,6 +1176,9 @@ def draw_console(surface, now):
         if shutdown_hold_started:
             hold_progress = min(1.0, (now - shutdown_hold_started) / 5.0)
             pygame.draw.rect(surface, AMBER, (maker_plate.x, maker_plate.bottom + 3, int(maker_plate.w * hold_progress), 3))
+    # The transporter page draws its large instrument panels after the selector;
+    # repaint the guard last so its lower enclosure cannot be obscured.
+    draw_party_return(surface, r["mode_selector"])
     if countdown_value is None and self_destruct_active:
         txt(surface, f"ABORT {abort_count}/5", h * .038, RED, (r["right"].centerx, r["right"].bottom - 42), "center", True)
 
@@ -2637,8 +2700,13 @@ def handle_touch(pos, now):
                 arm_until = now + 4.0
 
 def handle_press(pos, now):
-    global shutdown_hold_started, afg_dragging
+    global shutdown_hold_started, party_return_hold_started, afg_dragging
     r = layout(screen.get_size())
+    if (party_return_at_position(pos, screen.get_size()) and not any_sequence_active and
+            shutdown_confirm_until <= now and not shutdown_pending):
+        party_return_hold_started = now
+        mark_activity()
+        return
     if (mode_at_position(pos, screen.get_size()) or ship_status_active(now) or
             special_display_active(now)):
         handle_touch(pos, now)
@@ -2655,8 +2723,9 @@ def handle_press(pos, now):
         handle_touch(pos, now)
 
 def handle_release():
-    global shutdown_hold_started, afg_dragging
+    global shutdown_hold_started, party_return_hold_started, afg_dragging
     shutdown_hold_started = 0
+    party_return_hold_started = 0
     afg_dragging = False
 
 if not TEST_MODE and GPIO:
@@ -2711,6 +2780,21 @@ try:
         if shutdown_hold_started and now - shutdown_hold_started >= 5.0:
             shutdown_hold_started = 0
             shutdown_confirm_until = now + 10.0
+        if party_return_hold_started and now - party_return_hold_started >= 5.0:
+            party_return_hold_started = 0
+            if party_return_enabled:
+                party_return_enabled = False
+                party_return_disabled_until = now + PARTY_OVERRIDE_SECONDS
+            else:
+                party_return_enabled = True
+                party_return_disabled_until = 0
+            mark_activity()
+        if not party_return_enabled and now >= party_return_disabled_until:
+            party_return_enabled = True
+            party_return_disabled_until = 0
+        if (party_return_enabled and display_mode != "TRANSPORTER" and
+                now - last_activity >= PARTY_RETURN_SECONDS):
+            party_return_home(now)
         if arm_until and now >= arm_until:
             arm_until = 0
         if shutdown_confirm_until and now >= shutdown_confirm_until and not shutdown_pending:

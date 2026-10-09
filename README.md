@@ -30,6 +30,7 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Original two-tone retro computer bonk as the Sad Mac appears
 - Low-frequency core-breach impact layered beneath the spoken kaboom
 - Full-screen pulsing red self-destruct numerals with persistent abort guidance
+- Self-healing **PARTY RETURN** guard that restores Transporter after 20 idle seconds
 - Illuminated countdown-screen ABORT control aligned exactly with its live touch target
 - **ACOUSTIC FIELD GAIN** touchscreen slider controlling the real PipeWire output from 0–100%
 - Persistent five-position **TRANSPORTER / SHIP STATUS / AIR TRAFFIC / SPACE TRAFFIC / AUTO** selector
@@ -223,6 +224,16 @@ survives application and Raspberry Pi restarts. In AUTO, the first touchscreen
 tap on Ship Status wakes the transporter and is consumed; a second tap is
 required to activate a control. GPIO buttons remain immediate, and active
 transporter or self-destruct sequences override every telemetry display.
+
+For unattended party operation, the guarded **PARTY RETURN** control beneath
+the selector is armed whenever the application starts. Guests may explore any
+display, page, radar range, target, or flight strip; after 20 seconds without a
+touch, the console restores **TRANSPORTER**, resets sub-pages and selections,
+returns the radar to 80 NM, and clears an unconfirmed self-destruct arm. Active
+transporter and self-destruct sequences are never interrupted. A deliberate
+five-second hold grants a five-minute crew override, after which the guard
+re-arms itself automatically. Ordinary taps and button-mashing cannot disable
+it, and restarting the application always restores the armed state.
 
 Ship Status has four large touchscreen sub-pages:
 
