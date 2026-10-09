@@ -225,15 +225,22 @@ tap on Ship Status wakes the transporter and is consumed; a second tap is
 required to activate a control. GPIO buttons remain immediate, and active
 transporter or self-destruct sequences override every telemetry display.
 
-For unattended party operation, the guarded **PARTY RETURN** control beneath
-the selector is armed whenever the application starts. Guests may explore any
-display, page, radar range, target, or flight strip; after 20 seconds without a
-touch, the console restores **TRANSPORTER**, resets sub-pages and selections,
-returns the radar to 80 NM, and clears an unconfirmed self-destruct arm. Active
-transporter and self-destruct sequences are never interrupted. A deliberate
-five-second hold grants a five-minute crew override, after which the guard
-re-arms itself automatically. Ordinary taps and button-mashing cannot disable
-it, and restarting the application always restores the armed state.
+The guarded **VENUE CONTROL** beneath the selector distinguishes the console's
+two homes without needing a location service. In `AUTO`, a debounced wired
+Ethernet carrier means **OFFICE** behavior and leaves the chosen dashboard in
+place; Wi-Fi-only operation means **PARTY** behavior for the gazebo. Guests may
+then explore any display, page, radar range, target, or flight strip, but after
+20 seconds without a touch the console restores **TRANSPORTER**, resets
+sub-pages and selections, returns the radar to 80 NM, and clears an unconfirmed
+self-destruct arm. Active transporter and self-destruct sequences are never
+interrupted.
+
+A deliberate five-second hold cycles `AUTO → PARTY → OFFICE → AUTO`. The
+manual choice is stored in `~/.config/startrek-console.json`, so Greg can force
+either behavior when the network connection does not match the location.
+Ordinary taps and button-mashing cannot change it. The compact panel uses short
+two-line status text—`WI-FI • AUTO`, `WIRED • AUTO`, or `MANUAL` plus the chosen
+mode—so every label remains inside its hardware bezel.
 
 Ship Status has four large touchscreen sub-pages:
 

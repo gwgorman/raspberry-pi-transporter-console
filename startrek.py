@@ -43,7 +43,7 @@ TEST_MODE = "--test" in sys.argv
 WINDOWED = "--windowed" in sys.argv
 OFFICE_IDLE_SECONDS = 120.0
 PARTY_RETURN_SECONDS = 20.0
-PARTY_OVERRIDE_SECONDS = 300.0
+VENUE_LINK_DEBOUNCE_SECONDS = 10.0
 for arg in sys.argv:
     if arg.startswith("--mode="):
         MODE = arg.split("=", 1)[1].lower()
@@ -69,8 +69,6 @@ transport_progress = flash_until = arm_until = 0.0
 shutdown_hold_started = shutdown_confirm_until = party_return_hold_started = 0.0
 shutdown_pending = False
 power_action_pending = None
-party_return_enabled = True
-party_return_disabled_until = 0.0
 afg_dragging = False
 afg_value = 72
 afg_pending = None
@@ -84,13 +82,17 @@ def load_console_preferences():
             config = json.load(config_file)
             mode = config.get("display_mode", "AUTO")
             page = config.get("status_page", "NETWORK")
+            venue = config.get("venue_override", "AUTO")
             return (mode if mode in ("TRANSPORTER", "SHIP STATUS", "AIR TRAFFIC",
                                      "SPACE TRAFFIC", "AUTO") else "AUTO",
-                    page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS", "POWER CELLS") else "NETWORK")
+                    page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS", "POWER CELLS") else "NETWORK",
+                    venue if venue in ("AUTO", "PARTY", "OFFICE") else "AUTO")
     except (OSError, ValueError, TypeError):
-        return "AUTO", "NETWORK"
+        return "AUTO", "NETWORK", "AUTO"
 
-display_mode, status_page = load_console_preferences()
+display_mode, status_page, venue_override = load_console_preferences()
+ethernet_link_connected = ethernet_raw_link = False
+ethernet_raw_since = venue_link_poll = time.monotonic()
 telemetry = TelemetryService() if TelemetryService else None
 yolink = YoLinkService() if YoLinkService else None
 flight_telemetry = FlightTelemetryService() if FlightTelemetryService else None
@@ -184,7 +186,8 @@ def save_display_mode():
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
         temporary = CONFIG_PATH + ".tmp"
         with open(temporary, "w", encoding="utf-8") as config_file:
-            json.dump({"display_mode": display_mode, "status_page": status_page}, config_file)
+            json.dump({"display_mode": display_mode, "status_page": status_page,
+                       "venue_override": venue_override}, config_file)
         os.replace(temporary, CONFIG_PATH)
     except OSError as exc:
         print(f"Display mode was not persisted: {exc}")
@@ -215,6 +218,43 @@ def party_return_home(now):
         flight_telemetry.set_weather_enabled(False)
     save_display_mode()
     return True
+
+def wired_carrier_present():
+    """Return true when a conventional wired interface has physical carrier."""
+    try:
+        interfaces = os.listdir("/sys/class/net")
+    except OSError:
+        return False
+    for interface in interfaces:
+        if not interface.startswith(("eth", "en")):
+            continue
+        try:
+            with open(f"/sys/class/net/{interface}/carrier", encoding="ascii") as carrier:
+                if carrier.read().strip() == "1":
+                    return True
+        except OSError:
+            continue
+    return False
+
+def update_venue_link(now):
+    """Debounce cable changes so a brief network flap cannot change kiosk mode."""
+    global ethernet_link_connected, ethernet_raw_link, ethernet_raw_since, venue_link_poll
+    if now - venue_link_poll < 2.0:
+        return
+    venue_link_poll = now
+    raw = wired_carrier_present()
+    if raw != ethernet_raw_link:
+        ethernet_raw_link = raw
+        ethernet_raw_since = now
+    elif raw != ethernet_link_connected and now - ethernet_raw_since >= VENUE_LINK_DEBOUNCE_SECONDS:
+        ethernet_link_connected = raw
+
+def party_return_armed():
+    if venue_override == "PARTY":
+        return True
+    if venue_override == "OFFICE":
+        return False
+    return not ethernet_link_connected
 
 def ship_status_active(now):
     if (any_sequence_active or ui_state != "READY" or shutdown_confirm_until > now or
@@ -816,28 +856,29 @@ def party_return_rect(selector_rect):
                        selector_rect.w, int(selector_rect.h * .205))
 
 def draw_party_return(surface, selector_rect):
-    """Draw the guarded, self-rearming party-mode home switch."""
+    """Draw the guarded automatic/manual venue control."""
     rect = party_return_rect(selector_rect)
     panel(surface, rect, (38, 42, 39), BEZEL, 5)
     inner = rect.inflate(-10, -10)
     pygame.draw.rect(surface, (10, 14, 13), inner, border_radius=3)
-    txt(surface, "PARTY RETURN", rect.w * .082, CREAM,
+    txt(surface, "VENUE CONTROL", rect.w * .076, CREAM,
         (rect.centerx, rect.y + 13), "midtop", True)
     lamp = (rect.x + 22, rect.y + 48)
-    color = GREEN if party_return_enabled else RED
+    armed = party_return_armed()
+    color = GREEN if armed else CYAN
     pygame.draw.circle(surface, (110, 114, 104), lamp, 10)
     pygame.draw.circle(surface, (15, 19, 17), lamp, 7)
     pygame.draw.circle(surface, color, lamp, 5)
-    state = "ARMED" if party_return_enabled else "OVERRIDE"
-    txt(surface, state, rect.w * .084, color, (rect.x + 40, rect.y + 48), "midleft", True)
-    if party_return_enabled:
-        detail = "HOME AFTER 20 SEC"
+    state = "PARTY" if armed else "OFFICE"
+    txt(surface, state, rect.w * .082, color,
+        (rect.x + 40, rect.y + 48), "midleft", True)
+    if venue_override == "AUTO":
+        detail = "WIRED • AUTO" if ethernet_link_connected else "WI-FI • AUTO"
     else:
-        remaining = max(0, int(party_return_disabled_until - time.monotonic()) + 1)
-        detail = f"AUTO REARM {remaining // 60}:{remaining % 60:02d}"
+        detail = f"MANUAL • {venue_override}"
     txt(surface, detail, rect.w * .065, MUTED,
         (rect.centerx, rect.y + 72), "center", True)
-    txt(surface, "CREW ONLY  •  HOLD 5 SEC", rect.w * .047, AMBER,
+    txt(surface, "CREW ONLY • HOLD 5 SEC", rect.w * .043, AMBER,
         (rect.centerx, rect.bottom - 15), "center", True)
     if party_return_hold_started:
         progress = min(1.0, (time.monotonic() - party_return_hold_started) / 5.0)
@@ -2782,17 +2823,12 @@ try:
             shutdown_confirm_until = now + 10.0
         if party_return_hold_started and now - party_return_hold_started >= 5.0:
             party_return_hold_started = 0
-            if party_return_enabled:
-                party_return_enabled = False
-                party_return_disabled_until = now + PARTY_OVERRIDE_SECONDS
-            else:
-                party_return_enabled = True
-                party_return_disabled_until = 0
+            venue_modes = ("AUTO", "PARTY", "OFFICE")
+            venue_override = venue_modes[(venue_modes.index(venue_override) + 1) % len(venue_modes)]
             mark_activity()
-        if not party_return_enabled and now >= party_return_disabled_until:
-            party_return_enabled = True
-            party_return_disabled_until = 0
-        if (party_return_enabled and display_mode != "TRANSPORTER" and
+            save_display_mode()
+        update_venue_link(now)
+        if (party_return_armed() and display_mode != "TRANSPORTER" and
                 now - last_activity >= PARTY_RETURN_SECONDS):
             party_return_home(now)
         if arm_until and now >= arm_until:
