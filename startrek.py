@@ -888,12 +888,17 @@ def layout(size):
     selector_w = max(132, int(w * .088))
     content_x = margin + selector_w + gap
     content_w = w - margin - content_x
-    left_w, right_w = int(content_w * .28), int(content_w * .25)
-    center_w = content_w - left_w - right_w - gap * 2
+    # Reserve a true instrument bay between the gauge and pattern-buffer
+    # enclosures. Its extra width comes out of the gauge panel, leaving the
+    # main transporter display and right status panel undisturbed.
+    fader_lane = max(gap + 42, int(w * .040))
+    base_left_w, right_w = int(content_w * .28), int(content_w * .25)
+    left_w = base_left_w - (fader_lane - gap)
+    center_w = content_w - left_w - right_w - fader_lane - gap
     result = {
         "header": pygame.Rect(margin, margin, w - margin * 2, header_h),
         "left": pygame.Rect(content_x, body_y, left_w, body_h),
-        "center": pygame.Rect(content_x + left_w + gap, body_y, center_w, body_h),
+        "center": pygame.Rect(content_x + left_w + fader_lane, body_y, center_w, body_h),
         "right": pygame.Rect(w - margin - right_w, body_y, right_w, body_h),
         "energize": pygame.Rect(margin, h - margin - footer_h, int(w * .64), footer_h),
         "destruct": pygame.Rect(margin + int(w * .64) + gap, h - margin - footer_h, w - margin * 2 - int(w * .64) - gap, footer_h),
