@@ -404,7 +404,7 @@ Voice uses mixer channel 0 at full volume. The siren loops on channel 1 at 40% s
 
 The repository includes `assets/audio/bridge_ambience.wav`, an original,
 deterministically synthesized 48-second stereo soundscape—not audio copied from
-the television series. It loops at a restrained 22% application level only
+the television series. It loops at a restrained 40% application level only
 while PARTY behavior is active and the console is READY. It fades out for
 transporter, self-destruct, shutdown, and fault displays, then returns gently.
 Manual OFFICE mode keeps it silent. To reproduce the asset exactly, run
