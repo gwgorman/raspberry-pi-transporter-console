@@ -362,7 +362,10 @@ def update_bridge_ambience(now):
         not shutdown_pending)
     if wanted:
         if not bridge_ambience_active or not AMBIENCE_CHANNEL.get_busy():
-            AMBIENCE_CHANNEL.play(bridge_ambience, loops=-1, fade_ms=1800)
+            # Clear any completed fade before replay. A short rise makes an
+            # OFFICE -> PARTY change apparent without startling the room.
+            AMBIENCE_CHANNEL.stop()
+            AMBIENCE_CHANNEL.play(bridge_ambience, loops=-1, fade_ms=650)
         bridge_ambience_active = True
     elif bridge_ambience_active:
         AMBIENCE_CHANNEL.fadeout(350)
