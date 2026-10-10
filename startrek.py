@@ -69,8 +69,9 @@ transport_progress = flash_until = arm_until = 0.0
 shutdown_hold_started = shutdown_confirm_until = party_return_hold_started = 0.0
 shutdown_pending = False
 power_action_pending = None
-afg_dragging = False
+afg_dragging = ambience_dragging = False
 afg_value = 72
+bridge_ambience_value = 50
 afg_pending = None
 afg_event = threading.Event()
 last_activity = time.monotonic()
@@ -83,14 +84,16 @@ def load_console_preferences():
             mode = config.get("display_mode", "AUTO")
             page = config.get("status_page", "NETWORK")
             venue = config.get("venue_override", "AUTO")
+            ambience = max(0, min(100, int(config.get("bridge_ambience", 50))))
             return (mode if mode in ("TRANSPORTER", "SHIP STATUS", "AIR TRAFFIC",
                                      "SPACE TRAFFIC", "AUTO") else "AUTO",
                     page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS", "POWER CELLS") else "NETWORK",
-                    venue if venue in ("AUTO", "PARTY", "OFFICE") else "AUTO")
+                    venue if venue in ("AUTO", "PARTY", "OFFICE") else "AUTO",
+                    ambience)
     except (OSError, ValueError, TypeError):
-        return "AUTO", "NETWORK", "AUTO"
+        return "AUTO", "NETWORK", "AUTO", 50
 
-display_mode, status_page, venue_override = load_console_preferences()
+display_mode, status_page, venue_override, bridge_ambience_value = load_console_preferences()
 ethernet_link_connected = ethernet_raw_link = False
 ethernet_raw_since = venue_link_poll = time.monotonic()
 telemetry = TelemetryService() if TelemetryService else None
@@ -187,10 +190,18 @@ def save_display_mode():
         temporary = CONFIG_PATH + ".tmp"
         with open(temporary, "w", encoding="utf-8") as config_file:
             json.dump({"display_mode": display_mode, "status_page": status_page,
-                       "venue_override": venue_override}, config_file)
+                       "venue_override": venue_override,
+                       "bridge_ambience": bridge_ambience_value}, config_file)
         os.replace(temporary, CONFIG_PATH)
     except OSError as exc:
         print(f"Display mode was not persisted: {exc}")
+
+def set_bridge_ambience_volume(value):
+    """Apply the PARTY bridge-bed level independently of AFG."""
+    global bridge_ambience_value
+    bridge_ambience_value = max(0, min(100, int(round(value))))
+    if AMBIENCE_CHANNEL:
+        AMBIENCE_CHANNEL.set_volume(bridge_ambience_value / 100)
 
 def select_display_mode(mode):
     global display_mode
@@ -285,7 +296,7 @@ if BOOM_CHANNEL:
     BOOM_CHANNEL.set_volume(1.0)
 if AMBIENCE_CHANNEL:
     # The bridge bed should be felt between effects, never compete with them.
-    AMBIENCE_CHANNEL.set_volume(0.50)
+    AMBIENCE_CHANNEL.set_volume(bridge_ambience_value / 100)
 
 def make_sad_mac_chime():
     """Synthesize an original short two-tone retro computer error bonk."""
@@ -789,6 +800,32 @@ def button(surface, rect, title, subtitle, color, enabled=True, armed=False):
     txt(surface, title, rect.h * .25, WHITE if enabled else MUTED, (rect.centerx, rect.centery - rect.h * .08), "center", True)
     txt(surface, subtitle, rect.h * .11, c, (rect.centerx, rect.centery + rect.h * .23), "center", True)
 
+def audio_slider(surface, rect, label, value, readout, color, height_scale):
+    """Draw a hardware-panel horizontal audio control."""
+    pygame.draw.rect(surface, (70, 76, 72), rect, border_radius=5)
+    pygame.draw.rect(surface, (153, 157, 143), rect, 2, border_radius=5)
+    inner = rect.inflate(-10, -8)
+    pygame.draw.rect(surface, (4, 12, 15), inner, border_radius=3)
+    label_color = RED if value == 0 else CREAM
+    txt(surface, label, height_scale * .014, label_color,
+        (inner.x + 8, inner.y + 3), bold=True)
+    txt(surface, readout, height_scale * .016, label_color,
+        (inner.right - 8, inner.y + 3), "topright", True)
+    track = pygame.Rect(inner.x + 9, inner.bottom - max(14, int(inner.h * .34)),
+                        inner.w - 18, max(7, int(inner.h * .15)))
+    pygame.draw.rect(surface, (25, 37, 39), track, border_radius=track.h // 2)
+    fill_w = int(track.w * value / 100)
+    if fill_w:
+        pygame.draw.rect(surface, color, (track.x, track.y, fill_w, track.h),
+                         border_radius=track.h // 2)
+    for tick in range(0, 101, 10):
+        tick_x = track.x + int(track.w * tick / 100)
+        pygame.draw.line(surface, CREAM, (tick_x, track.bottom + 2),
+                         (tick_x, track.bottom + 5), 1)
+    knob_x = track.x + int(track.w * value / 100)
+    pygame.draw.circle(surface, (38, 42, 40), (knob_x, track.centery), track.h + 4)
+    pygame.draw.circle(surface, label_color, (knob_x, track.centery), track.h + 4, 3)
+
 def status_lamp(surface, rect, label, state, color, on=True):
     """Panel-mounted jewel lamp with bezel and engraved identification plate."""
     pygame.draw.rect(surface, (75, 80, 76), rect, border_radius=4)
@@ -827,9 +864,13 @@ def layout(size):
         "mode_selector": pygame.Rect(margin, body_y, selector_w, min(body_h, int(h * .48))),
     }
     result["maker_plate"] = pygame.Rect(result["right"].x + 62, result["right"].bottom - 31, result["right"].w - 124, 18)
+    slider_h, slider_gap = int(h * .060), int(h * .012)
     result["afg"] = pygame.Rect(result["center"].x + 62,
-                                result["center"].bottom - int(h * .115),
-                                result["center"].w - 124, int(h * .075))
+                                result["center"].bottom - int(h * .040) - slider_h,
+                                result["center"].w - 124, slider_h)
+    result["ambience"] = pygame.Rect(result["afg"].x,
+                                     result["afg"].y - slider_gap - slider_h,
+                                     result["afg"].w, slider_h)
     return result
 
 def draw_mode_selector(surface, rect):
@@ -1168,31 +1209,12 @@ def draw_console(surface, now):
         txt(surface, axis, h * .019, AMBER, (x, read_y + 28), bold=True)
         txt(surface, val, h * .029, WHITE, (x + 25, read_y + 24), bold=True)
 
-    afg = r["afg"]
-    pygame.draw.rect(surface, (70, 76, 72), afg, border_radius=5)
-    pygame.draw.rect(surface, (153, 157, 143), afg, 2, border_radius=5)
-    inner = afg.inflate(-10, -10)
-    pygame.draw.rect(surface, (4, 12, 15), inner, border_radius=3)
-    label_color = RED if afg_value == 0 else CREAM
-    txt(surface, "ACOUSTIC FIELD GAIN", h * .015, label_color,
-        (inner.x + 8, inner.y + 5), bold=True)
-    readout = "AURAL FIELD MUTED" if afg_value == 0 else f"AFG {afg_value:03d}"
-    txt(surface, readout, h * .017, label_color,
-        (inner.right - 8, inner.y + 5), "topright", True)
-    track = pygame.Rect(inner.x + 9, inner.bottom - int(inner.h * .36),
-                        inner.w - 18, max(8, int(inner.h * .16)))
-    pygame.draw.rect(surface, (25, 37, 39), track, border_radius=track.h // 2)
-    fill_w = int(track.w * afg_value / 100)
-    if fill_w:
-        pygame.draw.rect(surface, CYAN, (track.x, track.y, fill_w, track.h),
-                         border_radius=track.h // 2)
-    for tick in range(0, 101, 10):
-        tick_x = track.x + int(track.w * tick / 100)
-        pygame.draw.line(surface, CREAM, (tick_x, track.bottom + 2),
-                         (tick_x, track.bottom + 6), 1)
-    knob_x = track.x + int(track.w * afg_value / 100)
-    pygame.draw.circle(surface, (38, 42, 40), (knob_x, track.centery), track.h + 5)
-    pygame.draw.circle(surface, label_color, (knob_x, track.centery), track.h + 5, 3)
+    audio_slider(surface, r["ambience"], "BRIDGE AMBIENCE", bridge_ambience_value,
+                 "BRIDGE SILENT" if bridge_ambience_value == 0 else
+                 f"BRG {bridge_ambience_value:03d}", AMBER, h)
+    audio_slider(surface, r["afg"], "ACOUSTIC FIELD GAIN", afg_value,
+                 "AURAL FIELD MUTED" if afg_value == 0 else f"AFG {afg_value:03d}",
+                 CYAN, h)
     txt(surface, status_detail, h * .019, lamp, (r["center"].centerx, r["center"].bottom - 20), "midbottom", True)
 
     panel(surface, r["right"])
@@ -2753,7 +2775,10 @@ def handle_touch(pos, now):
         mark_activity()
         return
     mark_activity()
-    if r["afg"].collidepoint(pos) and countdown_value is None:
+    if r["ambience"].collidepoint(pos) and countdown_value is None:
+        track = r["ambience"].inflate(-28, -10)
+        set_bridge_ambience_volume((pos[0] - track.x) * 100 / max(1, track.w))
+    elif r["afg"].collidepoint(pos) and countdown_value is None:
         track = r["afg"].inflate(-28, -10)
         set_system_volume((pos[0] - track.x) * 100 / max(1, track.w))
     elif r["energize"].collidepoint(pos):
@@ -2769,7 +2794,7 @@ def handle_touch(pos, now):
                 arm_until = now + 4.0
 
 def handle_press(pos, now):
-    global shutdown_hold_started, party_return_hold_started, afg_dragging
+    global shutdown_hold_started, party_return_hold_started, afg_dragging, ambience_dragging
     r = layout(screen.get_size())
     if (party_return_at_position(pos, screen.get_size()) and not any_sequence_active and
             shutdown_confirm_until <= now and not shutdown_pending):
@@ -2778,6 +2803,11 @@ def handle_press(pos, now):
         return
     if (mode_at_position(pos, screen.get_size()) or ship_status_active(now) or
             special_display_active(now)):
+        handle_touch(pos, now)
+        return
+    if (r["ambience"].collidepoint(pos) and countdown_value is None and
+            shutdown_confirm_until <= now):
+        ambience_dragging = True
         handle_touch(pos, now)
         return
     if (r["afg"].collidepoint(pos) and countdown_value is None and
@@ -2792,10 +2822,13 @@ def handle_press(pos, now):
         handle_touch(pos, now)
 
 def handle_release():
-    global shutdown_hold_started, party_return_hold_started, afg_dragging
+    global shutdown_hold_started, party_return_hold_started, afg_dragging, ambience_dragging
+    if ambience_dragging:
+        save_display_mode()
     shutdown_hold_started = 0
     party_return_hold_started = 0
     afg_dragging = False
+    ambience_dragging = False
 
 if not TEST_MODE and GPIO:
     GPIO.setmode(GPIO.BCM)
@@ -2838,11 +2871,11 @@ try:
                 handle_press(event.pos, now)
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and not getattr(event, "touch", False):
                 handle_release()
-            elif event.type == pygame.MOUSEMOTION and afg_dragging:
+            elif event.type == pygame.MOUSEMOTION and (afg_dragging or ambience_dragging):
                 handle_touch(event.pos, now)
             elif event.type == pygame.FINGERDOWN:
                 handle_press((int(event.x * screen.get_width()), int(event.y * screen.get_height())), now)
-            elif event.type == pygame.FINGERMOTION and afg_dragging:
+            elif event.type == pygame.FINGERMOTION and (afg_dragging or ambience_dragging):
                 handle_touch((int(event.x * screen.get_width()), int(event.y * screen.get_height())), now)
             elif event.type == pygame.FINGERUP:
                 handle_release()

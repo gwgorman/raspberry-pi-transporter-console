@@ -33,6 +33,7 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Self-healing **PARTY RETURN** guard that restores Transporter after 20 idle seconds
 - Original 1960s-starship bridge ambience in PARTY mode, with machinery hum,
   sparse console chirps, relay ticks, and ring tones
+- Persistent **BRIDGE AMBIENCE** touchscreen level independent of foreground effects
 - Illuminated countdown-screen ABORT control aligned exactly with its live touch target
 - **ACOUSTIC FIELD GAIN** touchscreen slider controlling the real PipeWire output from 0–100%
 - Persistent five-position **TRANSPORTER / SHIP STATUS / AIR TRAFFIC / SPACE TRAFFIC / AUTO** selector
@@ -404,9 +405,11 @@ Voice uses mixer channel 0 at full volume. The siren loops on channel 1 at 40% s
 
 The repository includes `assets/audio/bridge_ambience.wav`, an original,
 deterministically synthesized 48-second stereo soundscape—not audio copied from
-the television series. It loops at a 50% application level only
-while PARTY behavior is active and the console is READY. It fades out for
+the television series. It loops at a user-adjustable 0–100% application level,
+defaulting to 50%, only while PARTY behavior is active and the console is READY. It fades out for
 transporter, self-destruct, shutdown, and fault displays, then returns gently.
+The **BRIDGE AMBIENCE** slider changes only this background bed and persists
+across application restarts and reboots; AFG remains the system-wide master.
 Manual OFFICE mode keeps it silent. To reproduce the asset exactly, run
 `python3 tools/generate_bridge_ambience.py`.
 
