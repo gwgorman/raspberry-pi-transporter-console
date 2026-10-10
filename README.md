@@ -33,7 +33,7 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Self-healing **PARTY RETURN** guard that restores Transporter after 20 idle seconds
 - Original 1960s-starship bridge ambience in PARTY mode, with machinery hum,
   sparse console chirps, relay ticks, and ring tones
-- Persistent **BRIDGE AMBIENCE** touchscreen level independent of foreground effects
+- Persistent vertical **BRIDGE AMBIENCE** touchscreen fader independent of foreground effects
 - Illuminated countdown-screen ABORT control aligned exactly with its live touch target
 - **ACOUSTIC FIELD GAIN** touchscreen slider controlling the real PipeWire output from 0–100%
 - Persistent five-position **TRANSPORTER / SHIP STATUS / AIR TRAFFIC / SPACE TRAFFIC / AUTO** selector

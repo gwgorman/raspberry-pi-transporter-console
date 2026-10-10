@@ -826,6 +826,42 @@ def audio_slider(surface, rect, label, value, readout, color, height_scale):
     pygame.draw.circle(surface, (38, 42, 40), (knob_x, track.centery), track.h + 4)
     pygame.draw.circle(surface, label_color, (knob_x, track.centery), track.h + 4, 3)
 
+def vertical_ambience_track(rect):
+    """Return the live track inside the narrow bridge-ambience fader."""
+    return pygame.Rect(rect.centerx + 7, rect.y + 51, 10, rect.h - 76)
+
+def vertical_ambience_slider(surface, rect, value, height_scale):
+    """Draw a slim Apollo-style fader between the gauge and buffer panels."""
+    pygame.draw.rect(surface, (70, 76, 72), rect, border_radius=5)
+    pygame.draw.rect(surface, (153, 157, 143), rect, 2, border_radius=5)
+    inner = rect.inflate(-8, -8)
+    pygame.draw.rect(surface, (4, 12, 15), inner, border_radius=3)
+    label_color = RED if value == 0 else CREAM
+    readout = pygame.Rect(inner.x + 3, inner.y + 3, inner.w - 6, 27)
+    pygame.draw.rect(surface, (0, 0, 0), readout, border_radius=2)
+    pygame.draw.rect(surface, BEZEL, readout, 1, border_radius=2)
+    txt(surface, "OFF" if value == 0 else f"{value:03d}", height_scale * .015,
+        label_color, readout.center, "center", True)
+    track = vertical_ambience_track(rect)
+    pygame.draw.rect(surface, (25, 37, 39), track, border_radius=track.w // 2)
+    fill_h = int(track.h * value / 100)
+    if fill_h:
+        pygame.draw.rect(surface, AMBER,
+                         (track.x, track.bottom - fill_h, track.w, fill_h),
+                         border_radius=track.w // 2)
+    for tick in range(0, 101, 10):
+        tick_y = track.bottom - int(track.h * tick / 100)
+        pygame.draw.line(surface, CREAM, (track.right + 3, tick_y),
+                         (track.right + (8 if tick % 50 else 12), tick_y), 1)
+    knob_y = track.bottom - int(track.h * value / 100)
+    knob = pygame.Rect(rect.x + 7, knob_y - 8, rect.w - 14, 16)
+    pygame.draw.rect(surface, (38, 42, 40), knob, border_radius=4)
+    pygame.draw.rect(surface, label_color, knob, 2, border_radius=4)
+    label_image = font(height_scale * .011, True).render("BRIDGE AMBIENCE", True, CREAM)
+    label_image = pygame.transform.rotate(label_image, 90)
+    label_rect = label_image.get_rect(center=(rect.x + 15, track.centery))
+    surface.blit(label_image, label_rect)
+
 def status_lamp(surface, rect, label, state, color, on=True):
     """Panel-mounted jewel lamp with bezel and engraved identification plate."""
     pygame.draw.rect(surface, (75, 80, 76), rect, border_radius=4)
@@ -864,13 +900,16 @@ def layout(size):
         "mode_selector": pygame.Rect(margin, body_y, selector_w, min(body_h, int(h * .48))),
     }
     result["maker_plate"] = pygame.Rect(result["right"].x + 62, result["right"].bottom - 31, result["right"].w - 124, 18)
-    slider_h, slider_gap = int(h * .060), int(h * .012)
+    slider_h = int(h * .075)
     result["afg"] = pygame.Rect(result["center"].x + 62,
-                                result["center"].bottom - int(h * .040) - slider_h,
+                                result["center"].bottom - int(h * .115),
                                 result["center"].w - 124, slider_h)
-    result["ambience"] = pygame.Rect(result["afg"].x,
-                                     result["afg"].y - slider_gap - slider_h,
-                                     result["afg"].w, slider_h)
+    fader_w = max(54, int(w * .032))
+    fader_h = int(result["center"].h * .62)
+    gap_center = (result["left"].right + result["center"].x) // 2
+    result["ambience"] = pygame.Rect(gap_center - fader_w // 2,
+                                     result["center"].centery - fader_h // 2,
+                                     fader_w, fader_h)
     return result
 
 def draw_mode_selector(surface, rect):
@@ -1209,12 +1248,10 @@ def draw_console(surface, now):
         txt(surface, axis, h * .019, AMBER, (x, read_y + 28), bold=True)
         txt(surface, val, h * .029, WHITE, (x + 25, read_y + 24), bold=True)
 
-    audio_slider(surface, r["ambience"], "BRIDGE AMBIENCE", bridge_ambience_value,
-                 "BRIDGE SILENT" if bridge_ambience_value == 0 else
-                 f"BRG {bridge_ambience_value:03d}", AMBER, h)
     audio_slider(surface, r["afg"], "ACOUSTIC FIELD GAIN", afg_value,
                  "AURAL FIELD MUTED" if afg_value == 0 else f"AFG {afg_value:03d}",
                  CYAN, h)
+    vertical_ambience_slider(surface, r["ambience"], bridge_ambience_value, h)
     txt(surface, status_detail, h * .019, lamp, (r["center"].centerx, r["center"].bottom - 20), "midbottom", True)
 
     panel(surface, r["right"])
@@ -2776,8 +2813,8 @@ def handle_touch(pos, now):
         return
     mark_activity()
     if r["ambience"].collidepoint(pos) and countdown_value is None:
-        track = r["ambience"].inflate(-28, -10)
-        set_bridge_ambience_volume((pos[0] - track.x) * 100 / max(1, track.w))
+        track = vertical_ambience_track(r["ambience"])
+        set_bridge_ambience_volume((track.bottom - pos[1]) * 100 / max(1, track.h))
     elif r["afg"].collidepoint(pos) and countdown_value is None:
         track = r["afg"].inflate(-28, -10)
         set_system_volume((pos[0] - track.x) * 100 / max(1, track.w))
