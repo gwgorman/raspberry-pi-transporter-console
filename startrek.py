@@ -285,7 +285,7 @@ if BOOM_CHANNEL:
     BOOM_CHANNEL.set_volume(1.0)
 if AMBIENCE_CHANNEL:
     # The bridge bed should be felt between effects, never compete with them.
-    AMBIENCE_CHANNEL.set_volume(0.40)
+    AMBIENCE_CHANNEL.set_volume(0.50)
 
 def make_sad_mac_chime():
     """Synthesize an original short two-tone retro computer error bonk."""
