@@ -130,7 +130,7 @@ info = pygame.display.Info()
 native_size = (info.current_w or 1920, info.current_h or 1080)
 flags = pygame.DOUBLEBUF
 screen = pygame.display.set_mode((1280, 720), flags | pygame.RESIZABLE) if WINDOWED else pygame.display.set_mode(native_size, flags | pygame.FULLSCREEN)
-pygame.display.set_caption("USS ENTERPRISE TRANSPORTER CONTROL")
+pygame.display.set_caption("USS GORMAN TRANSPORTER CONTROL")
 pygame.mouse.set_visible(TEST_MODE or WINDOWED)
 clock = pygame.time.Clock()
 
@@ -1538,8 +1538,8 @@ def draw_ship_status(surface, now, data):
     r, w, h = layout(surface.get_size()), *surface.get_size()
     surface.fill(BLACK)
     panel(surface, r["header"], NAVY, CYAN)
-    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
-        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    display_txt(surface, "USS GORMAN • NCC-1701", h * .027, MUTED,
+                (r["header"].x + 24, r["header"].y + 15))
     txt(surface, "COMPUTATION / WEATHER", h * .047, WHITE,
         (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
     draw_mode_selector(surface, r["mode_selector"])
@@ -1729,8 +1729,8 @@ def draw_environment_status(surface, now, data):
     r, w, h = layout(surface.get_size()), *surface.get_size()
     surface.fill(BLACK)
     panel(surface, r["header"], NAVY, CYAN)
-    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
-        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    display_txt(surface, "USS GORMAN • NCC-1701", h * .027, MUTED,
+                (r["header"].x + 24, r["header"].y + 15))
     txt(surface, "HABITATION SENSOR GRID", h * .047, WHITE,
         (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
     draw_mode_selector(surface, r["mode_selector"])
@@ -1949,8 +1949,8 @@ def draw_house_status(surface, now, data):
     r, w, h = layout(surface.get_size()), *surface.get_size()
     surface.fill(BLACK)
     panel(surface, r["header"], NAVY, CYAN)
-    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
-        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    display_txt(surface, "USS GORMAN • NCC-1701", h * .027, MUTED,
+                (r["header"].x + 24, r["header"].y + 15))
     txt(surface, "HOUSE SYSTEMS MONITOR", h * .047, WHITE,
         (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
     draw_mode_selector(surface, r["mode_selector"])
@@ -2110,8 +2110,8 @@ def draw_power_status(surface, now, telemetry_data, yolink_data):
     r, w, h = layout(surface.get_size()), *surface.get_size()
     surface.fill(BLACK)
     panel(surface, r["header"], NAVY, CYAN)
-    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
-        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    display_txt(surface, "USS GORMAN • NCC-1701", h * .027, MUTED,
+                (r["header"].x + 24, r["header"].y + 15))
     txt(surface, "REMOTE POWER CELL STATUS", h * .047, WHITE,
         (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
     draw_mode_selector(surface, r["mode_selector"])
@@ -2236,8 +2236,8 @@ def draw_air_traffic_status(surface, now, data):
     r, w, h = layout(surface.get_size()), *surface.get_size()
     surface.fill(BLACK)
     panel(surface, r["header"], NAVY, CYAN)
-    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
-        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    display_txt(surface, "USS GORMAN • NCC-1701", h * .027, MUTED,
+                (r["header"].x + 24, r["header"].y + 15))
     txt(surface, "LOCAL AIRSPACE SURVEILLANCE", h * .047, WHITE,
         (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
     draw_mode_selector(surface, r["mode_selector"])
@@ -2439,8 +2439,8 @@ def draw_satellite_status(surface, now, data):
     r, w, h = layout(surface.get_size()), *surface.get_size()
     surface.fill(BLACK)
     panel(surface, r["header"], NAVY, CYAN)
-    txt(surface, "USS ENTERPRISE • NCC-1701", h * .027, MUTED,
-        (r["header"].x + 24, r["header"].y + 15), bold=True)
+    display_txt(surface, "USS GORMAN • NCC-1701", h * .027, MUTED,
+                (r["header"].x + 24, r["header"].y + 15))
     txt(surface, "ORBITAL TRACKING • SPACE TRAFFIC", h * .047, WHITE,
         (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
     draw_mode_selector(surface, r["mode_selector"])
