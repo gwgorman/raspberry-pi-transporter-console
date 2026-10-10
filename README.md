@@ -387,6 +387,11 @@ transporter, self-destruct, shutdown, and fault displays, then returns gently.
 Manual OFFICE mode keeps it silent. To reproduce the asset exactly, run
 `python3 tools/generate_bridge_ambience.py`.
 
+For a privately licensed or personally supplied alternate ambience, install it
+as `~/.local/share/startrek-console/bridge_ambience_private.mp3`. The kiosk
+prefers that local-only file without copying it into the public repository and
+falls back automatically to the included original soundscape when it is absent.
+
 The generated Sad Mac chime and core-breach impact play at unity application
 gain. Their synthesized sample levels retain digital headroom; system loudness
 is controlled by **ACOUSTIC FIELD GAIN**.

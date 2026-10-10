@@ -325,7 +325,7 @@ def asset(name):
     return os.path.join(BASE_DIR, name)
 
 def load_sound(name):
-    path = asset(name)
+    path = name if os.path.isabs(name) else asset(name)
     if not pygame.mixer.get_init() or not os.path.exists(path):
         print(f"Warning: {name} missing or mixer unavailable")
         return None
@@ -339,7 +339,12 @@ transporter_sound = load_sound("transporter.wav")
 siren_sound = load_sound("siren.wav") if MODE in ("selfdestruct", "both") else None
 sad_mac_chime = make_sad_mac_chime()
 core_breach_thump = make_core_breach_thump()
-bridge_ambience = load_sound(os.path.join("assets", "audio", "bridge_ambience.wav"))
+private_bridge_ambience = os.path.join(
+    os.path.expanduser("~"), ".local", "share", "startrek-console",
+    "bridge_ambience_private.mp3")
+bridge_ambience = load_sound(
+    private_bridge_ambience if os.path.exists(private_bridge_ambience) else
+    os.path.join("assets", "audio", "bridge_ambience.wav"))
 voice_sounds = {}
 for name in os.listdir(BASE_DIR):
     if name.startswith("speak_") and name.endswith(".wav"):
