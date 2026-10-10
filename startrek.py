@@ -339,9 +339,7 @@ transporter_sound = load_sound("transporter.wav")
 siren_sound = load_sound("siren.wav") if MODE in ("selfdestruct", "both") else None
 sad_mac_chime = make_sad_mac_chime()
 core_breach_thump = make_core_breach_thump()
-private_bridge_ambience = os.path.join(
-    os.path.expanduser("~"), ".local", "share", "startrek-console",
-    "bridge_ambience_private.mp3")
+private_bridge_ambience = asset("bridge_ambience.mp3")
 bridge_ambience = load_sound(
     private_bridge_ambience if os.path.exists(private_bridge_ambience) else
     os.path.join("assets", "audio", "bridge_ambience.wav"))

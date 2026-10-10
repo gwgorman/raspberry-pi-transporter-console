@@ -374,7 +374,7 @@ public repository.
 | --- | --- | --- |
 | `transporter.wav` | Ten-second ENERGIZE sequence | **TOS Transporter 1** from the [TrekCore Star Trek Audio archive](https://www.trekcore.com/audio/). The source recording is 31.848 seconds; the Pi copy was trimmed, faded, and level-adjusted for the ten-second visual cycle. |
 | `siren.wav` | Repeating self-destruct alarm | **TOS Red Alert 1** from [TrekCore](https://www.trekcore.com/audio/). The 53.688-second catalog duration matches the local converted WAV; the application plays it at 40%. |
-| `~/.local/share/startrek-console/bridge_ambience_private.mp3` | PARTY-mode bridge background | **TOS Bridge 2** from [TrekCore](https://www.trekcore.com/audio/), 4:48.696. This private Pi-only override is not tracked by Git. |
+| `bridge_ambience.mp3` | PARTY-mode bridge background | **TOS Bridge 2** from [TrekCore](https://www.trekcore.com/audio/), 4:48.696. This private Pi-only override lives beside the other audio files and is not tracked by Git. |
 | `speak_started.wav` | Self-destruct opening announcement | Project-specific synthesized voice clip. The original voice generator was not recorded in the repository history; do not attribute it to TrekCore. |
 | `speak_10.wav` … `speak_1.wav` | Spoken countdown | Project-specific synthesized voice clips; generator unknown. Remastered locally for consistent speech loudness. |
 | `speak_aborted.wav` | Successful abort announcement | Project-specific synthesized voice clip; generator unknown. |
@@ -411,7 +411,7 @@ Manual OFFICE mode keeps it silent. To reproduce the asset exactly, run
 `python3 tools/generate_bridge_ambience.py`.
 
 For a privately licensed or personally supplied alternate ambience, install it
-as `~/.local/share/startrek-console/bridge_ambience_private.mp3`. The kiosk
+as `bridge_ambience.mp3` beside `startrek.py` and the other live sounds. The kiosk
 prefers that local-only file without copying it into the public repository and
 falls back automatically to the included original soundscape when it is absent.
 
