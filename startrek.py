@@ -274,6 +274,7 @@ VOICE_CHANNEL = pygame.mixer.Channel(0) if pygame.mixer.get_init() else None
 SIREN_CHANNEL = pygame.mixer.Channel(1) if pygame.mixer.get_init() else None
 CHIME_CHANNEL = pygame.mixer.Channel(2) if pygame.mixer.get_init() else None
 BOOM_CHANNEL = pygame.mixer.Channel(3) if pygame.mixer.get_init() else None
+AMBIENCE_CHANNEL = pygame.mixer.Channel(4) if pygame.mixer.get_init() else None
 if VOICE_CHANNEL:
     VOICE_CHANNEL.set_volume(1.0)
 if SIREN_CHANNEL:
@@ -282,6 +283,9 @@ if CHIME_CHANNEL:
     CHIME_CHANNEL.set_volume(1.0)
 if BOOM_CHANNEL:
     BOOM_CHANNEL.set_volume(1.0)
+if AMBIENCE_CHANNEL:
+    # The bridge bed should be felt between effects, never compete with them.
+    AMBIENCE_CHANNEL.set_volume(0.22)
 
 def make_sad_mac_chime():
     """Synthesize an original short two-tone retro computer error bonk."""
@@ -335,6 +339,7 @@ transporter_sound = load_sound("transporter.wav")
 siren_sound = load_sound("siren.wav") if MODE in ("selfdestruct", "both") else None
 sad_mac_chime = make_sad_mac_chime()
 core_breach_thump = make_core_breach_thump()
+bridge_ambience = load_sound(os.path.join("assets", "audio", "bridge_ambience.wav"))
 voice_sounds = {}
 for name in os.listdir(BASE_DIR):
     if name.startswith("speak_") and name.endswith(".wav"):
@@ -342,6 +347,23 @@ for name in os.listdir(BASE_DIR):
         if sound:
             voice_sounds[name[6:-4]] = sound
 siren_stop_event = threading.Event()
+bridge_ambience_active = False
+
+def update_bridge_ambience(now):
+    """Fade the original bridge soundscape with PARTY/foreground state."""
+    global bridge_ambience_active
+    wanted = bool(
+        bridge_ambience and AMBIENCE_CHANNEL and party_return_armed() and
+        not any_sequence_active and ui_state == "READY" and
+        countdown_value is None and shutdown_confirm_until <= now and
+        not shutdown_pending)
+    if wanted:
+        if not bridge_ambience_active or not AMBIENCE_CHANNEL.get_busy():
+            AMBIENCE_CHANNEL.play(bridge_ambience, loops=-1, fade_ms=1800)
+        bridge_ambience_active = True
+    elif bridge_ambience_active:
+        AMBIENCE_CHANNEL.fadeout(350)
+        bridge_ambience_active = False
 
 def play_voice_wait(key):
     sound = voice_sounds.get(key)
@@ -2828,6 +2850,7 @@ try:
             mark_activity()
             save_display_mode()
         update_venue_link(now)
+        update_bridge_ambience(now)
         if (party_return_armed() and display_mode != "TRANSPORTER" and
                 now - last_activity >= PARTY_RETURN_SECONDS):
             party_return_home(now)

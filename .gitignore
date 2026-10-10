@@ -2,9 +2,9 @@ __pycache__/
 *.py[cod]
 *.log
 *.wav
+!assets/audio/bridge_ambience.wav
 *.mp3
 *.ogg
 .DS_Store
 .venv/
 venv/
-
