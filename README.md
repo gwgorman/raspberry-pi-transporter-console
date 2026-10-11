@@ -219,19 +219,24 @@ rail on every primary display:
   console.
 - **AIR TRAFFIC** opens the local PiAware surveillance display.
 - **SPACE TRAFFIC** opens the CelesTrak orbital display.
-- **AUTO** returns to the transporter on activity and enters Ship Status after
-  two READY-state idle minutes.
+- **AUTO** uses the party-safe idle behavior in the gazebo and joins the
+  ten-second data carousel in Office behavior.
 
 The selected position is stored in `~/.config/startrek-console.json` and
-survives application and Raspberry Pi restarts. In AUTO, the first touchscreen
-tap on Ship Status wakes the transporter and is consumed; a second tap is
-required to activate a control. GPIO buttons remain immediate, and active
-transporter or self-destruct sequences override every telemetry display.
+survives application and Raspberry Pi restarts. In Party AUTO, the first
+touchscreen tap on Ship Status wakes the transporter and is consumed; a second
+tap is required to activate a control. GPIO buttons remain immediate, and
+active transporter or self-destruct sequences override every telemetry display.
 
 The guarded **VENUE CONTROL** beneath the selector distinguishes the console's
 two homes without needing a location service. In `AUTO`, a debounced wired
-Ethernet carrier means **OFFICE** behavior and leaves the chosen dashboard in
-place; Wi-Fi-only operation means **PARTY** behavior for the gazebo. Guests may
+Ethernet carrier means **OFFICE** behavior; Wi-Fi-only operation means
+**PARTY** behavior for the gazebo. In Office behavior, the console becomes an
+unattended data carousel, dwelling for ten seconds each on **Core & Weather →
+Room Sensors → House Systems → Power Cells → Air Traffic → Space Traffic** and
+then repeating. Transporter is never part of the automatic rotation. A touch or
+manual page choice restarts the current ten-second dwell, and active transporter
+or self-destruct effects pause the carousel before it resumes. Guests may
 then explore any display, page, radar range, target, or flight strip, but after
 20 seconds without a touch the console restores **TRANSPORTER**, resets
 sub-pages and selections, returns the radar to 80 NM, and clears an unconfirmed

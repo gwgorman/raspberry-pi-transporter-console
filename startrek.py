@@ -42,6 +42,15 @@ MODE = "both"
 TEST_MODE = "--test" in sys.argv
 WINDOWED = "--windowed" in sys.argv
 OFFICE_IDLE_SECONDS = 120.0
+OFFICE_ROTATION_SECONDS = 10.0
+OFFICE_ROTATION_SEQUENCE = (
+    ("SHIP STATUS", "NETWORK"),
+    ("SHIP STATUS", "ENVIRONMENT"),
+    ("SHIP STATUS", "HOUSE SYSTEMS"),
+    ("SHIP STATUS", "POWER CELLS"),
+    ("AIR TRAFFIC", "NETWORK"),
+    ("SPACE TRAFFIC", "NETWORK"),
+)
 PARTY_RETURN_SECONDS = 20.0
 VENUE_LINK_DEBOUNCE_SECONDS = 10.0
 for arg in sys.argv:
@@ -75,6 +84,8 @@ bridge_ambience_value = 50
 afg_pending = None
 afg_event = threading.Event()
 last_activity = time.monotonic()
+office_rotation_last = last_activity
+office_rotation_was_enabled = False
 
 def load_console_preferences():
     try:
@@ -180,8 +191,9 @@ def set_system_volume(value):
     afg_event.set()
 
 def mark_activity():
-    global last_activity
+    global last_activity, office_rotation_last
     last_activity = time.monotonic()
+    office_rotation_last = last_activity
 
 def save_display_mode():
     try:
@@ -266,6 +278,31 @@ def party_return_armed():
     if venue_override == "OFFICE":
         return False
     return not ethernet_link_connected
+
+def update_office_rotation(now):
+    """Advance the unattended office display without ever cycling through Transporter."""
+    global display_mode, status_page, office_rotation_last, office_rotation_was_enabled
+    enabled = (not party_return_armed() and not any_sequence_active and
+               ui_state == "READY" and shutdown_confirm_until <= now and
+               not shutdown_pending and countdown_value is None)
+    if not enabled:
+        office_rotation_last = now
+        office_rotation_was_enabled = False
+        return
+    if not office_rotation_was_enabled:
+        office_rotation_last = now
+        office_rotation_was_enabled = True
+        return
+    if now - office_rotation_last < OFFICE_ROTATION_SECONDS:
+        return
+    current = ((display_mode, status_page) if display_mode == "SHIP STATUS"
+               else (display_mode, "NETWORK"))
+    try:
+        index = OFFICE_ROTATION_SEQUENCE.index(current)
+    except ValueError:
+        index = -1
+    display_mode, status_page = OFFICE_ROTATION_SEQUENCE[(index + 1) % len(OFFICE_ROTATION_SEQUENCE)]
+    office_rotation_last = now
 
 def ship_status_active(now):
     if (any_sequence_active or ui_state != "READY" or shutdown_confirm_until > now or
@@ -2931,6 +2968,7 @@ try:
             mark_activity()
             save_display_mode()
         update_venue_link(now)
+        update_office_rotation(now)
         update_bridge_ambience(now)
         if (party_return_armed() and display_mode != "TRANSPORTER" and
                 now - last_activity >= PARTY_RETURN_SECONDS):
