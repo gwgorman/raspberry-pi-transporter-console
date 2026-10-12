@@ -20,7 +20,10 @@ except ImportError:  # Keep the console usable while the optional package is abs
 SITE_LAT = 33.142790
 SITE_LON = -96.623370
 REFRESH_SECONDS = 2 * 60 * 60
+RETRY_SECONDS = 5 * 60
 PASS_REFRESH_SECONDS = 15 * 60
+CACHE_WARNING_SECONDS = 4 * 60 * 60
+CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 CELESTRAK_URLS = (
     "https://celestrak.org/NORAD/elements/gp.php?GROUP=VISUAL&FORMAT=TLE",
     "https://celestrak.org/NORAD/elements/gp.php?GROUP=STATIONS&FORMAT=TLE",
@@ -56,6 +59,19 @@ PLANETS = (
     ("JUPITER", "jupiter barycenter"), ("SATURN", "saturn barycenter"),
     ("URANUS", "uranus barycenter"), ("NEPTUNE", "neptune barycenter"),
 )
+
+
+def catalog_condition(data, now=None):
+    """Return (nominal|stale|fault, age) for a rendered orbital solution."""
+    now = time.time() if now is None else now
+    catalog_updated = float(data.get("catalog_updated") or 0)
+    age = max(0.0, now - catalog_updated) if catalog_updated else float("inf")
+    usable = bool(data.get("connected")) and bool(data.get("catalog_count"))
+    if not usable or age >= CACHE_MAX_AGE_SECONDS:
+        return "fault", age
+    if data.get("error") or age >= CACHE_WARNING_SECONDS:
+        return "stale", age
+    return "nominal", age
 
 
 def _tle_records(text):
@@ -111,6 +127,7 @@ class SatelliteTelemetryService:
         self._data = {
             "updated": 0.0, "catalog_updated": 0.0, "connected": False,
             "error": "STARTING", "catalog_count": 0, "overhead": [], "upcoming": [],
+            "retry_at": 0.0,
             "site": {"lat": SITE_LAT, "lon": SITE_LON},
             "planets": [], "stars": [], "celestial_error": "STARTING",
         }
@@ -230,7 +247,7 @@ class SatelliteTelemetryService:
             stars = sorted(visible_stars, key=lambda item: item["magnitude"])[:3]
         with self._lock:
             self._data.update(updated=time.time(), overhead=overhead, planets=planets,
-                              stars=stars, connected=True, error="")
+                              stars=stars, connected=True)
 
     def _passes(self):
         start = self._ts.now()
@@ -283,22 +300,37 @@ class SatelliteTelemetryService:
                 with self._lock:
                     self._data["celestial_error"] = str(exc)
             catalog_stamp = self._load_cache()
+            if self._satellites:
+                with self._lock:
+                    self._data.update(connected=True, error="")
         except (OSError, ValueError) as exc:
             catalog_stamp = 0.0
             with self._lock:
                 self._data["error"] = str(exc)
+        next_catalog_refresh = (catalog_stamp + REFRESH_SECONDS
+                                if self._satellites and self._metadata else 0.0)
         next_pass_refresh = 0.0
         while not self._stop.is_set():
             now = time.time()
-            try:
-                if not self._satellites or not self._metadata or now - catalog_stamp >= REFRESH_SECONDS:
+            if now >= next_catalog_refresh:
+                try:
                     catalog_stamp = self._refresh_catalog()
+                    next_catalog_refresh = now + REFRESH_SECONDS
                     next_pass_refresh = 0.0
-                self._positions()
-                if now >= next_pass_refresh:
-                    self._passes()
-                    next_pass_refresh = now + PASS_REFRESH_SECONDS
-            except (OSError, ValueError, urllib.error.URLError) as exc:
-                with self._lock:
-                    self._data.update(error=str(exc), connected=bool(self._satellites))
+                    with self._lock:
+                        self._data.update(error="", connected=True, retry_at=0.0)
+                except (OSError, ValueError, urllib.error.URLError) as exc:
+                    next_catalog_refresh = now + RETRY_SECONDS
+                    with self._lock:
+                        self._data.update(error=str(exc), connected=bool(self._satellites),
+                                          retry_at=next_catalog_refresh)
+            if self._satellites:
+                try:
+                    self._positions()
+                    if now >= next_pass_refresh:
+                        self._passes()
+                        next_pass_refresh = now + PASS_REFRESH_SECONDS
+                except (OSError, ValueError, OverflowError) as exc:
+                    with self._lock:
+                        self._data.update(error=str(exc), connected=False)
             self._stop.wait(5.0)

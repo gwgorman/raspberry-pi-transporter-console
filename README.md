@@ -207,6 +207,12 @@ Orbital elements and SATCAT launch metadata are cached under
 The display uses public CelesTrak data and does not require Space-Track account
 credentials.
 
+Catalog downloads are failure-isolated from orbit calculation. A failed
+download retries after five minutes while the console continues recalculating
+positions and passes from the last good TLE cache. The display reports that
+condition in amber with the cache age; the red mechanical fault shutter is
+reserved for a missing/unusable catalog or one older than seven days.
+
 ## Display selector
 
 ![Apollo-style Ship Status dashboard at 1920×1080](assets/ship-status-screenshot.png)

@@ -29,9 +29,10 @@ except ImportError:
     FlightTelemetryService = None
 
 try:
-    from satellite_telemetry import SatelliteTelemetryService
+    from satellite_telemetry import SatelliteTelemetryService, catalog_condition
 except ImportError:
     SatelliteTelemetryService = None
+    catalog_condition = None
 
 try:
     import RPi.GPIO as GPIO
@@ -2482,11 +2483,20 @@ def draw_satellite_status(surface, now, data):
         (r["header"].x + 24, r["header"].bottom - 16), "bottomleft", True)
     draw_mode_selector(surface, r["mode_selector"])
 
-    catalog_age = time.time() - float(data.get("catalog_updated") or 0)
-    connected = bool(data.get("connected")) and catalog_age < 14400
-    link_color = GREEN if connected else RED
+    condition, catalog_age = (catalog_condition(data) if catalog_condition
+                              else ("fault", float("inf")))
+    hard_fault, stale = condition == "fault", condition == "stale"
+    link_color = RED if hard_fault else AMBER if stale else GREEN
+    if hard_fault:
+        orbital_status = "ORBITAL DATA FAULT"
+    elif stale:
+        age_text = (f"{int(catalog_age // 86400)}D" if catalog_age >= 86400
+                    else f"{max(1, int(catalog_age // 3600))}H")
+        orbital_status = f"CACHED ORBITS • {age_text} OLD"
+    else:
+        orbital_status = "ORBITAL SOLUTION NOMINAL"
     pygame.draw.circle(surface, link_color, (r["header"].right - 38, r["header"].centery), 14)
-    txt(surface, "ORBITAL SOLUTION NOMINAL" if connected else "ORBITAL DATA FAULT", h * .023,
+    txt(surface, orbital_status, h * .023,
         link_color, (r["header"].right - 66, r["header"].centery), "midright", True)
 
     gap, margin = int(w * .012), int(w * .018)
@@ -2561,11 +2571,11 @@ def draw_satellite_status(surface, now, data):
     pygame.draw.circle(surface, WHITE, center, 4)
     txt(surface, "ZENITH", h * .010, WHITE, (center[0] + 8, center[1] + 5), bold=True)
     txt(surface, f"SAT {len(overhead):02d}  •  PLANETS {len(data.get('planets', [])):02d}  •  CATALOG {int(data.get('catalog_count') or 0):03d}",
-        h * .014, GREEN if connected else RED,
+        h * .014, link_color,
         (sky_panel.centerx, sky_panel.bottom - 14), "midbottom", True)
     txt(surface, "● SATELLITE    ◇ PLANET    + BRIGHT STAR", h * .011, MUTED,
         (sky_panel.x + 17, sky_panel.bottom - 14), "bottomleft", True)
-    if not connected:
+    if hard_fault:
         invalid_data_flag(surface, pygame.Rect(center[0] - radius, center[1] - radius,
                                                radius * 2, radius * 2), "ORBIT DATA")
 
