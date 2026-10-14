@@ -71,6 +71,13 @@ deliberate `come play with me` attempt. Further calls are randomized 10–20
 minutes apart. Any interaction wakes her. `WHERE'S THE BAR?` always produces a
 large right-pointing answer from the guest's viewpoint.
 
+When several guests interact within two minutes, a crowd pulse shortens the
+visual-event interval to 60–90 seconds without ever allowing more than one
+unsolicited event per minute. Max remembers her eight most recent lines to
+avoid obvious repetition, returns to the quieter 110–200-second rhythm as the
+crowd disperses, and remains suppressed during every core sequence. A second
+completed discovery of the secret panel reveals why she sounds British.
+
 The included Max lines use the macOS `Shelley (English (UK))` voice at 205 WPM,
 chosen as a bright, hopeful young British disguise. Voice playback is disabled
 by default and remains silent until Greg explicitly approves it. After approval,

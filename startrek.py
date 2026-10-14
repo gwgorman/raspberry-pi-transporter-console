@@ -414,7 +414,7 @@ bridge_ambience = load_sound(
 max_voice_sounds = {}
 for voice_id in ("hello_transporter", "computer_bored", "press_something",
                  "left_unsupervised", "anybody", "welcome_back", "that_way",
-                 "secret_hello"):
+                 "secret_hello", "accent_confession"):
     sound = load_sound(os.path.join("assets", "audio", f"max_{voice_id}.wav"))
     if sound:
         max_voice_sounds[voice_id] = sound
@@ -433,6 +433,7 @@ class MaxClient:
         self.process = None
         self.buffer = ""
         self.lock = threading.Lock()
+        self.last_activity_sent = 0.0
         try:
             self.process = subprocess.Popen(
                 [sys.executable, os.path.join(BASE_DIR, "max_personality.py"), "--sidecar"],
@@ -448,6 +449,11 @@ class MaxClient:
         if not self.process or self.process.poll() is not None:
             return False
         try:
+            if message.get("cmd") == "activity":
+                now = time.monotonic()
+                if now - self.last_activity_sent < .35:
+                    return True
+                self.last_activity_sent = now
             line = json.dumps(message, separators=(",", ":")) + "\n"
             with self.lock:
                 self.process.stdin.write(line)
@@ -596,6 +602,8 @@ def self_destruct_task():
         stop_siren()
         set_ui("ABORTED", "SELF DESTRUCT SEQUENCE ABORTED")
         time.sleep(2.0)
+        if max_client:
+            max_client.send({"cmd": "abort_complete"})
     else:
         if core_breach_thump and BOOM_CHANNEL:
             BOOM_CHANNEL.play(core_breach_thump)
