@@ -3,6 +3,7 @@ __pycache__/
 *.log
 *.wav
 !assets/audio/bridge_ambience.wav
+!assets/audio/max_*.wav
 *.mp3
 *.ogg
 .DS_Store

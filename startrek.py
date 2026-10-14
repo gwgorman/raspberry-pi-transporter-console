@@ -2,7 +2,9 @@
 """Touch-first Star Trek transporter kiosk for Raspberry Pi."""
 
 import math
+import fcntl
 import io
+import json
 import os
 import re
 import subprocess
@@ -77,6 +79,7 @@ ui_state, status_detail = "READY", "PATTERN BUFFER STANDING BY"
 countdown_value = None
 transport_progress = flash_until = arm_until = 0.0
 shutdown_hold_started = shutdown_confirm_until = party_return_hold_started = 0.0
+max_command_hold_started = 0.0
 shutdown_pending = False
 power_action_pending = None
 afg_dragging = ambience_dragging = False
@@ -87,6 +90,15 @@ afg_event = threading.Event()
 last_activity = time.monotonic()
 office_rotation_last = last_activity
 office_rotation_was_enabled = False
+max_overlay = None
+max_overlay_until = 0.0
+max_menu_open = max_command_open = False
+max_status = {"phase": "ONLINE", "score": 0, "quiet": False, "counters": {}}
+max_last_allowed = None
+max_client = None
+max_transport_complete_pending = False
+# Deliberately opt-in: prerecorded MAX lines must not play until Greg approves.
+max_voice_enabled = os.environ.get("STARTREK_MAX_VOICE", "0") == "1"
 
 def load_console_preferences():
     try:
@@ -97,15 +109,16 @@ def load_console_preferences():
             page = config.get("status_page", "NETWORK")
             venue = config.get("venue_override", "AUTO")
             ambience = max(0, min(100, int(config.get("bridge_ambience", 50))))
+            max_enabled = bool(config.get("max_enabled", True))
             return (mode if mode in ("TRANSPORTER", "SHIP STATUS", "AIR TRAFFIC",
                                      "SPACE TRAFFIC", "AUTO") else "AUTO",
                     page if page in ("NETWORK", "ENVIRONMENT", "HOUSE SYSTEMS", "POWER CELLS") else "NETWORK",
                     venue if venue in ("AUTO", "PARTY", "OFFICE") else "AUTO",
-                    ambience)
+                    ambience, max_enabled)
     except (OSError, ValueError, TypeError):
-        return "AUTO", "NETWORK", "AUTO", 50
+        return "AUTO", "NETWORK", "AUTO", 50, True
 
-display_mode, status_page, venue_override, bridge_ambience_value = load_console_preferences()
+display_mode, status_page, venue_override, bridge_ambience_value, max_enabled = load_console_preferences()
 ethernet_link_connected = ethernet_raw_link = False
 ethernet_raw_since = venue_link_poll = time.monotonic()
 telemetry = TelemetryService() if TelemetryService else None
@@ -195,6 +208,8 @@ def mark_activity():
     global last_activity, office_rotation_last
     last_activity = time.monotonic()
     office_rotation_last = last_activity
+    if max_client:
+        max_client.send({"cmd": "activity"})
 
 def save_display_mode():
     try:
@@ -204,7 +219,8 @@ def save_display_mode():
         with open(temporary, "w", encoding="utf-8") as config_file:
             json.dump({"display_mode": display_mode, "status_page": status_page,
                        "venue_override": venue_override,
-                       "bridge_ambience": bridge_ambience_value}, config_file)
+                       "bridge_ambience": bridge_ambience_value,
+                       "max_enabled": max_enabled}, config_file)
         os.replace(temporary, CONFIG_PATH)
     except OSError as exc:
         print(f"Display mode was not persisted: {exc}")
@@ -324,6 +340,7 @@ SIREN_CHANNEL = pygame.mixer.Channel(1) if pygame.mixer.get_init() else None
 CHIME_CHANNEL = pygame.mixer.Channel(2) if pygame.mixer.get_init() else None
 BOOM_CHANNEL = pygame.mixer.Channel(3) if pygame.mixer.get_init() else None
 AMBIENCE_CHANNEL = pygame.mixer.Channel(4) if pygame.mixer.get_init() else None
+MAX_CHANNEL = pygame.mixer.Channel(5) if pygame.mixer.get_init() else None
 if VOICE_CHANNEL:
     VOICE_CHANNEL.set_volume(1.0)
 if SIREN_CHANNEL:
@@ -335,6 +352,8 @@ if BOOM_CHANNEL:
 if AMBIENCE_CHANNEL:
     # The bridge bed should be felt between effects, never compete with them.
     AMBIENCE_CHANNEL.set_volume(bridge_ambience_value / 100)
+if MAX_CHANNEL:
+    MAX_CHANNEL.set_volume(.62)
 
 def make_sad_mac_chime():
     """Synthesize an original short two-tone retro computer error bonk."""
@@ -392,6 +411,13 @@ private_bridge_ambience = asset("bridge_ambience.mp3")
 bridge_ambience = load_sound(
     private_bridge_ambience if os.path.exists(private_bridge_ambience) else
     os.path.join("assets", "audio", "bridge_ambience.wav"))
+max_voice_sounds = {}
+for voice_id in ("hello_transporter", "computer_bored", "press_something",
+                 "left_unsupervised", "anybody", "welcome_back", "that_way",
+                 "secret_hello"):
+    sound = load_sound(os.path.join("assets", "audio", f"max_{voice_id}.wav"))
+    if sound:
+        max_voice_sounds[voice_id] = sound
 voice_sounds = {}
 for name in os.listdir(BASE_DIR):
     if name.startswith("speak_") and name.endswith(".wav"):
@@ -400,6 +426,59 @@ for name in os.listdir(BASE_DIR):
             voice_sounds[name[6:-4]] = sound
 siren_stop_event = threading.Event()
 bridge_ambience_active = False
+
+class MaxClient:
+    """Non-blocking, failure-contained link to the optional MAX.sys sidecar."""
+    def __init__(self):
+        self.process = None
+        self.buffer = ""
+        self.lock = threading.Lock()
+        try:
+            self.process = subprocess.Popen(
+                [sys.executable, os.path.join(BASE_DIR, "max_personality.py"), "--sidecar"],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, bufsize=1)
+            flags = fcntl.fcntl(self.process.stdout.fileno(), fcntl.F_GETFL)
+            fcntl.fcntl(self.process.stdout.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        except (OSError, ValueError) as exc:
+            print(f"MAX.sys unavailable: {exc}")
+            self.process = None
+
+    def send(self, message):
+        if not self.process or self.process.poll() is not None:
+            return False
+        try:
+            line = json.dumps(message, separators=(",", ":")) + "\n"
+            with self.lock:
+                self.process.stdin.write(line)
+                self.process.stdin.flush()
+            return True
+        except (BrokenPipeError, OSError, ValueError):
+            return False
+
+    def poll(self):
+        if not self.process or self.process.poll() is not None:
+            return []
+        try:
+            chunk = self.process.stdout.read()
+        except (BlockingIOError, OSError, TypeError):
+            chunk = ""
+        if chunk:
+            self.buffer = (self.buffer + chunk)[-16384:]
+        messages = []
+        while "\n" in self.buffer:
+            line, self.buffer = self.buffer.split("\n", 1)
+            try:
+                item = json.loads(line)
+                if isinstance(item, dict) and len(str(item.get("text", ""))) <= 300:
+                    messages.append(item)
+            except (TypeError, ValueError):
+                pass
+        return messages
+
+    def stop(self):
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
 
 def update_bridge_ambience(now):
     """Fade the original bridge soundscape with PARTY/foreground state."""
@@ -461,7 +540,7 @@ def transport_phase(progress):
     return "PATTERN COHERENCE VERIFIED"
 
 def play_transporter_task():
-    global any_sequence_active
+    global any_sequence_active, max_transport_complete_pending
     with state_lock:
         if MODE not in ("transporter", "both") or any_sequence_active:
             return
@@ -489,6 +568,7 @@ def play_transporter_task():
     with state_lock:
         any_sequence_active = False
     set_ui("READY", "PATTERN BUFFER STANDING BY", progress=0)
+    max_transport_complete_pending = True
 
 def self_destruct_task():
     global any_sequence_active, self_destruct_active, abort_count, abort_triggered, flash_until
@@ -534,11 +614,13 @@ def self_destruct_task():
     set_ui("READY", "PATTERN BUFFER STANDING BY", progress=0)
 
 def trigger_transporter():
+    dismiss_max()
     mark_activity()
     threading.Thread(target=play_transporter_task, daemon=True).start()
 
 def trigger_self_destruct():
     global abort_count, abort_triggered
+    dismiss_max()
     mark_activity()
     with state_lock:
         if self_destruct_active:
@@ -954,6 +1036,181 @@ def layout(size):
                                      result["center"].centery - fader_h // 2,
                                      fader_w, fader_h)
     return result
+
+MAX_CHOICES = ("SHIP STATUS", "TRANSPORT ME", "WHERE'S THE BAR?",
+               "SHOULD I HAVE ANOTHER?", "WHO'S IN CHARGE?", "DO SOMETHING")
+
+def max_eye_rect(size):
+    r, w, h = layout(size), *size
+    return pygame.Rect(r["header"].x + int(w * .405), r["header"].y + 10,
+                       int(w * .17), r["header"].h - 20)
+
+def max_insignia_rect(size):
+    r, w, h = layout(size), *size
+    return pygame.Rect(r["header"].right - int(w * .285), r["header"].y + 11,
+                       int(h * .066), int(h * .090))
+
+def max_status_rect(size):
+    r, _w, h = layout(size), *size
+    return pygame.Rect(r["right"].right - int(h * .150), r["right"].y + 10,
+                       int(h * .135), int(h * .040))
+
+def max_body_rect(size):
+    r = layout(size)
+    return pygame.Rect(r["left"].x, r["left"].y,
+                       r["right"].right - r["left"].x, r["left"].h)
+
+def max_choice_rects(size):
+    body = max_body_rect(size).inflate(-80, -120)
+    gap = 18
+    cell_w = (body.w - gap) // 2
+    cell_h = (body.h - gap * 2) // 3
+    return [pygame.Rect(body.x + (index % 2) * (cell_w + gap),
+                        body.y + (index // 2) * (cell_h + gap), cell_w, cell_h)
+            for index in range(6)]
+
+def max_command_rects(size):
+    body = max_body_rect(size).inflate(-120, -135)
+    gap = 16
+    labels = ("MAX PARTY MODE", "RESET TIMER", "RESET MAX", "VIEW COUNTERS", "RETURN TO SHIP")
+    cell_h = (body.h - gap * (len(labels) - 1)) // len(labels)
+    return {label: pygame.Rect(body.x, body.y + index * (cell_h + gap), body.w, cell_h)
+            for index, label in enumerate(labels)}
+
+def max_allowed(now=None):
+    now = time.monotonic() if now is None else now
+    return bool(max_enabled and party_return_armed() and display_mode == "TRANSPORTER" and
+                not any_sequence_active and ui_state == "READY" and countdown_value is None and
+                shutdown_confirm_until <= now and not shutdown_pending)
+
+def dismiss_max():
+    global max_overlay, max_overlay_until, max_menu_open, max_command_open
+    max_overlay = None
+    max_overlay_until = 0.0
+    max_menu_open = max_command_open = False
+    if MAX_CHANNEL:
+        MAX_CHANNEL.stop()
+
+def show_max_event(event, now):
+    global max_overlay, max_overlay_until, max_menu_open, max_command_open
+    max_menu_open = max_command_open = False
+    max_overlay = event
+    max_overlay_until = now + max(2.0, min(12.0, float(event.get("duration", 5.0))))
+    sound = max_voice_sounds.get(event.get("voice"))
+    if max_voice_enabled and sound and MAX_CHANNEL and max_allowed(now):
+        MAX_CHANNEL.play(sound)
+
+def update_max(now):
+    global max_last_allowed, max_status, max_overlay, max_overlay_until
+    global max_transport_complete_pending
+    allowed = max_allowed(now)
+    if allowed != max_last_allowed:
+        max_last_allowed = allowed
+        if max_client:
+            max_client.send({"cmd": "set_active", "active": allowed})
+        if not allowed and not max_command_open:
+            dismiss_max()
+    if max_transport_complete_pending and allowed:
+        max_transport_complete_pending = False
+        if max_client:
+            max_client.send({"cmd": "transport_complete"})
+    if max_client:
+        for message in max_client.poll():
+            if message.get("type") == "status":
+                max_status = message
+            elif message.get("type") == "event" and allowed and not (max_menu_open or max_command_open):
+                show_max_event(message, now)
+    if max_overlay and now >= max_overlay_until:
+        max_overlay = None
+
+def draw_max_eye(surface, rect, phase="ONLINE", large=False):
+    colors = {"ONLINE": CYAN, "CURIOUS": GREEN, "PLAYFUL": AMBER,
+              "UNFILTERED": ORANGE, "LATE WATCH": BLUE}
+    color = colors.get(phase, CYAN)
+    pygame.draw.ellipse(surface, (62, 69, 65), rect)
+    inner = rect.inflate(-max(6, rect.h // 10), -max(6, rect.h // 10))
+    pygame.draw.ellipse(surface, (2, 9, 12), inner)
+    pygame.draw.ellipse(surface, color, inner, max(2, rect.h // 18))
+    pupil_r = max(7, int(rect.h * (.25 if large else .20)))
+    pygame.draw.circle(surface, color, inner.center, pupil_r)
+    pygame.draw.circle(surface, BLACK, inner.center, max(3, pupil_r // 2))
+    pygame.draw.circle(surface, WHITE, (inner.centerx - pupil_r // 3,
+                                        inner.centery - pupil_r // 3), max(2, pupil_r // 7))
+
+def draw_max_chrome(surface, now):
+    if not party_return_armed() or display_mode != "TRANSPORTER":
+        return
+    eye = max_eye_rect(surface.get_size())
+    draw_max_eye(surface, eye, max_status.get("phase", "ONLINE") if max_enabled else "LATE WATCH")
+    txt(surface, "ASK MAX" if max_enabled else "MAX DORMANT", eye.h * .19,
+        CREAM, (eye.centerx, eye.bottom - 5), "midbottom", True)
+    jewel = max_status_rect(surface.get_size())
+    pygame.draw.rect(surface, BEZEL, jewel, border_radius=4)
+    pygame.draw.rect(surface, (4, 12, 13), jewel.inflate(-4, -4), border_radius=3)
+    lamp = GREEN if max_allowed(now) else (45, 48, 44)
+    pygame.draw.circle(surface, lamp, (jewel.x + 14, jewel.centery), 6)
+    txt(surface, "MAX ACTIVE" if max_enabled else "MAX OFF", jewel.h * .29,
+        CREAM, (jewel.x + 27, jewel.centery), "midleft", True)
+    if max_command_hold_started:
+        progress = min(1.0, (now - max_command_hold_started) / 5.0)
+        insignia = max_insignia_rect(surface.get_size())
+        pygame.draw.rect(surface, AMBER, (insignia.x, insignia.bottom + 2,
+                                          int(insignia.w * progress), 4))
+
+def draw_max_overlay(surface, now):
+    if not (max_menu_open or max_command_open or max_overlay):
+        return
+    body = max_body_rect(surface.get_size())
+    pygame.draw.rect(surface, (1, 5, 8), body, border_radius=14)
+    pygame.draw.rect(surface, CYAN, body, 3, border_radius=14)
+    phase = max_status.get("phase", "ONLINE")
+    if max_menu_open:
+        txt(surface, "ASK MAX", body.h * .075, CYAN, (body.centerx, body.y + 22), "midtop", True)
+        for choice, rect in zip(MAX_CHOICES, max_choice_rects(surface.get_size())):
+            button(surface, rect, choice, "MAX.SYS QUERY", AMBER if choice == "DO SOMETHING" else CYAN)
+        return
+    if max_command_open:
+        txt(surface, "MAX.SYS COMMAND MODE", body.h * .060, AMBER,
+            (body.centerx, body.y + 16), "midtop", True)
+        for label, rect in max_command_rects(surface.get_size()).items():
+            subtitle = ("ON" if max_enabled else "OFF") if label == "MAX PARTY MODE" else "PROTECTED CONTROL"
+            button(surface, rect, label, subtitle, GREEN if label == "RETURN TO SHIP" else AMBER)
+        return
+    kind = max_overlay.get("kind")
+    text = str(max_overlay.get("text", "MAX.SYS ONLINE"))
+    if kind == "secret":
+        elapsed = max(0.0, max_overlay_until - now)
+        eye = pygame.Rect(body.centerx - int(body.h * .18), body.y + 45,
+                          int(body.h * .36), int(body.h * .20))
+        draw_max_eye(surface, eye, phase, True)
+        lines = ("HELLO.", "YOU FOUND ME.", "I'M MAX.", "PLEASE DON'T TELL THE CAPTAIN.")
+        visible = min(4, max(1, int((8.0 - elapsed) / 1.6) + 1))
+        for index, line in enumerate(lines[:visible]):
+            txt(surface, line, body.h * (.075 if index == 1 else .045),
+                CYAN if index < 3 else AMBER,
+                (body.centerx, body.centery + index * body.h * .075), "center", True)
+    elif kind == "bar":
+        txt(surface, "BAR  ➜", body.h * .20, AMBER, body.center, "center", True)
+        txt(surface, "RIGHT SIDE FROM YOUR VIEW", body.h * .038, CREAM,
+            (body.centerx, body.bottom - 55), "center", True)
+    else:
+        eye = pygame.Rect(body.centerx - 90, body.y + 55, 180, 82)
+        draw_max_eye(surface, eye, phase)
+        wrapped = []
+        words = text.split()
+        line = ""
+        for word in words:
+            trial = (line + " " + word).strip()
+            if len(trial) > 38 and line:
+                wrapped.append(line); line = word
+            else:
+                line = trial
+        if line: wrapped.append(line)
+        for index, line in enumerate(wrapped[:4]):
+            txt(surface, line, body.h * .055, CREAM,
+                (body.centerx, body.centery - 20 + index * body.h * .075), "center", True)
+        txt(surface, f"MAX.SYS  •  {phase}", body.h * .026, MUTED,
+            (body.centerx, body.bottom - 24), "center", True)
 
 def draw_mode_selector(surface, rect):
     """Panel-mounted five-position rotary display selector."""
@@ -2882,9 +3139,75 @@ def handle_touch(pos, now):
             else:
                 arm_until = now + 4.0
 
+def handle_max_touch(pos, now):
+    """Handle only Max-owned regions; return True when the touch is consumed."""
+    global max_menu_open, max_command_open, max_overlay, max_overlay_until, max_enabled
+    if not max_allowed(now) and not max_command_open:
+        return False
+    if max_menu_open:
+        for choice, rect in zip(MAX_CHOICES, max_choice_rects(screen.get_size())):
+            if rect.collidepoint(pos):
+                max_menu_open = False
+                if max_client:
+                    max_client.send({"cmd": "choice", "choice": choice})
+                if choice == "TRANSPORT ME":
+                    trigger_transporter()
+                return True
+        if max_body_rect(screen.get_size()).collidepoint(pos):
+            dismiss_max()
+            return True
+    if max_command_open:
+        for label, rect in max_command_rects(screen.get_size()).items():
+            if not rect.collidepoint(pos):
+                continue
+            if label == "MAX PARTY MODE":
+                max_enabled = not max_enabled
+                save_display_mode()
+                if not max_enabled:
+                    dismiss_max()
+            elif label == "RESET TIMER":
+                if max_client:
+                    max_client.send({"cmd": "activity"})
+                max_command_open = False
+            elif label == "RESET MAX":
+                if max_client:
+                    max_client.send({"cmd": "reset", "active": True})
+            elif label == "VIEW COUNTERS":
+                counters = max_status.get("counters", {})
+                text = "  •  ".join(f"{key.upper()} {value}" for key, value in counters.items())
+                max_overlay = {"kind": "response", "text": text or "NO EVENTS RECORDED"}
+                max_overlay_until = now + 8.0
+                max_command_open = False
+            else:
+                dismiss_max()
+            return True
+        if max_body_rect(screen.get_size()).collidepoint(pos):
+            dismiss_max()
+            return True
+    if max_eye_rect(screen.get_size()).collidepoint(pos):
+        max_menu_open = True
+        max_overlay = None
+        if max_client:
+            max_client.send({"cmd": "activity", "points": 1})
+        return True
+    if max_status_rect(screen.get_size()).collidepoint(pos):
+        if max_client:
+            max_client.send({"cmd": "secret"})
+        return True
+    if max_overlay and max_body_rect(screen.get_size()).collidepoint(pos):
+        dismiss_max()
+        return True
+    return False
+
 def handle_press(pos, now):
     global shutdown_hold_started, party_return_hold_started, afg_dragging, ambience_dragging
+    global max_command_hold_started
     r = layout(screen.get_size())
+    # Core and emergency controls always outrank MAX overlays.
+    if r["energize"].collidepoint(pos) or r["destruct"].collidepoint(pos):
+        dismiss_max()
+        handle_touch(pos, now)
+        return
     if (party_return_at_position(pos, screen.get_size()) and not any_sequence_active and
             shutdown_confirm_until <= now and not shutdown_pending):
         party_return_hold_started = now
@@ -2892,7 +3215,18 @@ def handle_press(pos, now):
         return
     if (mode_at_position(pos, screen.get_size()) or ship_status_active(now) or
             special_display_active(now)):
+        dismiss_max()
         handle_touch(pos, now)
+        return
+    command_available = (party_return_armed() and display_mode == "TRANSPORTER" and
+                         not any_sequence_active and ui_state == "READY" and
+                         shutdown_confirm_until <= now and not shutdown_pending)
+    if command_available and max_insignia_rect(screen.get_size()).inflate(18, 12).collidepoint(pos):
+        max_command_hold_started = now
+        mark_activity()
+        return
+    if handle_max_touch(pos, now):
+        mark_activity()
         return
     if (r["ambience"].collidepoint(pos) and countdown_value is None and
             shutdown_confirm_until <= now):
@@ -2912,10 +3246,12 @@ def handle_press(pos, now):
 
 def handle_release():
     global shutdown_hold_started, party_return_hold_started, afg_dragging, ambience_dragging
+    global max_command_hold_started
     if ambience_dragging:
         save_display_mode()
     shutdown_hold_started = 0
     party_return_hold_started = 0
+    max_command_hold_started = 0
     afg_dragging = False
     ambience_dragging = False
 
@@ -2940,6 +3276,7 @@ if flight_telemetry:
     flight_telemetry.start()
 if satellite_telemetry:
     satellite_telemetry.start()
+max_client = MaxClient()
 
 print(f"MODE: {MODE.upper()} | TEST: {TEST_MODE} | DISPLAY: {screen.get_size()}")
 try:
@@ -2977,9 +3314,17 @@ try:
             venue_override = venue_modes[(venue_modes.index(venue_override) + 1) % len(venue_modes)]
             mark_activity()
             save_display_mode()
+        if max_command_hold_started and now - max_command_hold_started >= 5.0:
+            max_command_hold_started = 0
+            max_command_open = True
+            max_menu_open = False
+            max_overlay = None
+            if max_client:
+                max_client.send({"cmd": "activity", "points": 1})
         update_venue_link(now)
         update_office_rotation(now)
         update_bridge_ambience(now)
+        update_max(now)
         if (party_return_armed() and display_mode != "TRANSPORTER" and
                 now - last_activity >= PARTY_RETURN_SECONDS):
             party_return_home(now)
@@ -3010,6 +3355,8 @@ try:
                 draw_ship_status(screen, now, telemetry.snapshot() if telemetry else {})
         else:
             draw_console(screen, now)
+            draw_max_chrome(screen, now)
+            draw_max_overlay(screen, now)
             if countdown_value is not None:
                 draw_destruct_countdown(screen, now)
         if shutdown_confirm_until > now or shutdown_pending:
@@ -3027,6 +3374,8 @@ finally:
         flight_telemetry.stop()
     if satellite_telemetry:
         satellite_telemetry.stop()
+    if max_client:
+        max_client.stop()
     stop_siren()
     if pygame.mixer.get_init():
         pygame.mixer.stop()
