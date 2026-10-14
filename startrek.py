@@ -415,7 +415,10 @@ max_voice_sounds = {}
 for voice_id in ("hello_transporter", "computer_bored", "press_something",
                  "left_unsupervised", "anybody", "welcome_back", "that_way",
                  "secret_hello", "accent_confession"):
-    sound = load_sound(os.path.join("assets", "audio", f"max_{voice_id}.wav"))
+    private_voice = asset(f"max_private_{voice_id}.wav")
+    sound = load_sound(
+        private_voice if os.path.exists(private_voice) else
+        os.path.join("assets", "audio", f"max_{voice_id}.wav"))
     if sound:
         max_voice_sounds[voice_id] = sound
 voice_sounds = {}
