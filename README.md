@@ -90,6 +90,13 @@ silent until Greg explicitly approves it. After approval, launch with
 `STARTREK_MAX_VOICE=1` to enable only these Max clips. Her visual features and
 all existing console audio remain otherwise independent.
 
+The second secret-panel discovery has one extra vocal trick: Max briefly drops
+the British disguise using the private ElevenLabs Voice Design
+`MAX.sys - Real Voice` (voice ID `IGLJCNS0TLImxTB7jSau`), admits that the
+accent is fake, then snaps back to the bright British voice to insist that it
+is definitely her real voice. The two performances are joined into the single
+private `max_private_accent_confession.wav` asset.
+
 The center-panel **ACOUSTIC FIELD GAIN** control shows `AFG 000` through
 `AFG 100`; at zero it reads `AURAL FIELD MUTED`. It controls PipeWire's current
 default audio sink with `wpctl`, caps gain at 100%, and relies on WirePlumber's

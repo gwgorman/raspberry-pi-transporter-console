@@ -1053,8 +1053,9 @@ MAX_CHOICES = ("SHIP STATUS", "TRANSPORT ME", "WHERE'S THE BAR?",
 
 def max_eye_rect(size):
     r, w, h = layout(size), *size
-    return pygame.Rect(r["header"].x + int(w * .405), r["header"].y + 10,
-                       int(w * .17), r["header"].h - 20)
+    # Keep the eye in the clear header bay between the title and insignia.
+    return pygame.Rect(r["header"].x + int(w * .46), r["header"].y + 10,
+                       int(w * .15), r["header"].h - 20)
 
 def max_insignia_rect(size):
     r, w, h = layout(size), *size
