@@ -1,0 +1,10 @@
+#!/bin/sh
+
+interface=$1
+event=$2
+
+case "$interface:$event" in
+    wlan0:up|wlan0:dhcp4-change|eth0:up|eth0:dhcp4-change)
+        systemctl try-restart avahi-daemon.service
+        ;;
+esac

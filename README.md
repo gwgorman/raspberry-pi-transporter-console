@@ -543,6 +543,30 @@ systemctl --user status app-startrek@autostart.service
 systemctl --user restart app-startrek@autostart.service
 ```
 
+### Local-network reliability
+
+The live Pi uses NetworkManager connection `preconfigured`. To prevent Wi-Fi
+power saving from making the kiosk and its `.local` name intermittently
+unreachable, disable it persistently without changing DHCP addressing:
+
+```bash
+sudo nmcli connection modify preconfigured 802-11-wireless.powersave 2
+```
+
+NetworkManager applies that radio setting on the next Wi-Fi reconnection or
+reboot. The optional dispatcher hook restarts Avahi whenever Wi-Fi or Ethernet
+comes back after a link or DHCP interruption:
+
+```bash
+sudo install -o root -g root -m 755 tools/90-startrek-avahi-recovery \
+  /etc/NetworkManager/dispatcher.d/90-startrek-avahi-recovery
+sudo systemctl enable --now avahi-daemon.service
+```
+
+Verify from another machine with `ping startrek.local` or
+`ssh ggorman@startrek.local`. This hardening deliberately leaves IP assignment
+under DHCP; it does not require a router-side reservation.
+
 ## Safety and escape hatch
 
 This is a theatrical prop. It does not control real transporters, warp cores, or self-destruct hardware.
