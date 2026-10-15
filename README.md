@@ -40,9 +40,10 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Apollo-style Ship Status dashboard with Pi, network, WeatherFlow UDP, and curated MQTT telemetry
 - Clear **CORE & WEATHER** and **ROOM SENSORS** ship-status pages
 - Paginated House Systems page with selected SmartThings groups and Lewisville water data
-- Local PiAware air-traffic radar with flight strips and optional NEXRAD overlay
+- Local PiAware air-traffic radar with an expanded near-field projection, flight strips,
+  and optional NEXRAD overlay
 - CelesTrak orbital plot with touch-selectable overhead objects, paged/pinnable flight strips,
-  predicted passes, launch metadata, flags, planets, and bright stars
+  predicted passes, launch metadata, flags, planets, bright stars, and a slow phosphor sweep
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
@@ -227,6 +228,12 @@ once every five minutes, and fails independently of aircraft surveillance.
 The supplementary PiAware status endpoint is also optional: unavailable radio
 or MLAT metadata does not suppress healthy aircraft and receiver feeds.
 
+The scope uses a square-root range projection: nearby aircraft receive more
+screen area because the local, lower-altitude traffic is densest, while the
+sparser high-altitude targets near maximum receiver range remain visible in a
+compressed outer band. Range rings, aircraft trails, and targets all use the
+same mapping, while strip readouts continue to show true nautical-mile range.
+
 ![Live Air Traffic radar and flight strips](assets/air-traffic-screenshot.png)
 
 ## Space Traffic
@@ -235,7 +242,9 @@ The `SPACE TRAFFIC` page combines CelesTrak's `VISUAL` and `STATIONS` orbital
 groups. `satellite_telemetry.py` uses Skyfield to calculate current azimuth,
 elevation, slant range, and upcoming passes from the console's local position.
 It also plots visible planets using the cached JPL DE421 ephemeris and up to
-three currently visible stars from a small named bright-star catalog.
+three currently visible stars from a small named bright-star catalog. A slow
+cyan acquisition sweep with a phosphor tail gives the all-sky display useful
+motion without representing the calculated orbital positions as radar returns.
 
 Every satellite symbol has a 48×48 touchscreen target. Touching a satellite:
 

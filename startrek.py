@@ -2517,6 +2517,12 @@ def draw_aircraft_symbol(surface, point, heading, color, selected=False):
     if selected:
         pygame.draw.circle(surface, WHITE, point, size + 6, 2)
 
+def radar_range_fraction(distance_nm, maximum_nm):
+    """Expand crowded nearby airspace while retaining the full selected range."""
+    if maximum_nm <= 0:
+        return 0.0
+    return math.sqrt(max(0.0, min(1.0, float(distance_nm) / maximum_nm)))
+
 def draw_flight_strip(surface, rect, item, selected=False):
     emergency = item.get("emergency") not in (None, "none") or item.get("squawk") in ("7500", "7600", "7700")
     border = RED if emergency else WHITE if selected else BEZEL
@@ -2593,7 +2599,8 @@ def draw_air_traffic_status(surface, now, data):
     if radar_weather_enabled and receiver.get("lat") is not None:
         draw_nexrad_layer(surface, center, radius, radar_range_nm, receiver, weather)
     for ring in range(1, 5):
-        ring_radius = radius * ring // 4
+        ring_radius = round(radius * radar_range_fraction(radar_range_nm * ring / 4,
+                                                          radar_range_nm))
         pygame.draw.circle(surface, (31, 92, 74), center, ring_radius, 1 if ring < 4 else 2)
         txt(surface, f"{radar_range_nm * ring // 4}", h * .011, MUTED,
             (center[0] + 5, center[1] - ring_radius + 3), "topleft", True)
@@ -2623,8 +2630,10 @@ def draw_air_traffic_status(surface, now, data):
             plotted.append(enriched)
             if distance > radar_range_nm:
                 continue
-            point = (round(center[0] + dx / radar_range_nm * radius),
-                     round(center[1] - dy / radar_range_nm * radius))
+            projected = radar_range_fraction(distance, radar_range_nm)
+            scale = projected * radius / distance if distance else 0
+            point = (round(center[0] + dx * scale),
+                     round(center[1] - dy * scale))
             altitude = item.get("alt_baro")
             altitude_num = float(altitude) if isinstance(altitude, (int, float)) else 0
             color = GREEN if altitude_num < 5000 else AMBER if altitude_num < 18000 else CYAN
@@ -2633,8 +2642,11 @@ def draw_air_traffic_status(surface, now, data):
             for lat, lon, _stamp in item.get("trail", []):
                 tdx = (lon - float(receiver["lon"])) * 60 * math.cos(math.radians(float(receiver["lat"])))
                 tdy = (lat - float(receiver["lat"])) * 60
-                trail_points.append((round(center[0] + tdx / radar_range_nm * radius),
-                                     round(center[1] - tdy / radar_range_nm * radius)))
+                trail_distance = math.hypot(tdx, tdy)
+                trail_projected = radar_range_fraction(trail_distance, radar_range_nm)
+                trail_scale = trail_projected * radius / trail_distance if trail_distance else 0
+                trail_points.append((round(center[0] + tdx * trail_scale),
+                                     round(center[1] - tdy * trail_scale)))
             if len(trail_points) > 1:
                 pygame.draw.lines(surface, tuple(channel // 2 for channel in color), False, trail_points, 1)
             draw_aircraft_symbol(surface, point, item.get("track") or item.get("mag_heading"), color, selected)
@@ -2797,6 +2809,18 @@ def draw_satellite_status(surface, now, data):
     for azimuth, label in ((0, "N"), (90, "E"), (180, "S"), (270, "W")):
         point = _satellite_point(center, radius + 18, azimuth, 0)
         txt(surface, label, h * .015, CREAM, point, "center", True)
+
+    # A slow phosphor acquisition sweep keeps the computed all-sky plot alive
+    # without suggesting the console is a conventional ranging radar.
+    sweep_angle = (now * .22) % (math.pi * 2) - math.pi / 2
+    for trail in range(9, -1, -1):
+        angle = sweep_angle - trail * .026
+        strength = (10 - trail) / 10
+        color = (round(14 + 40 * strength), round(48 + 145 * strength),
+                 round(57 + 150 * strength))
+        end = (center[0] + math.cos(angle) * radius,
+               center[1] + math.sin(angle) * radius)
+        pygame.draw.line(surface, color, center, end, 2 if trail == 0 else 1)
 
     overhead = data.get("overhead", [])
     satellite_target_hitboxes = {}
