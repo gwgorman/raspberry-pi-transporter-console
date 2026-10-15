@@ -2810,24 +2810,12 @@ def draw_satellite_status(surface, now, data):
         point = _satellite_point(center, radius + 18, azimuth, 0)
         txt(surface, label, h * .015, CREAM, point, "center", True)
 
-    # A slow acquisition line and dotted phosphor persistence cloud keep the
-    # computed all-sky plot alive without a distracting fan of solid rays.
+    # A single slow, anti-aliased acquisition line keeps the computed all-sky
+    # plot alive without distracting persistence effects.
     sweep_angle = (now * .22) % (math.pi * 2) - math.pi / 2
     sweep_end = (center[0] + math.cos(sweep_angle) * radius,
                  center[1] + math.sin(sweep_angle) * radius)
-    pygame.draw.line(surface, (48, 164, 206), center, sweep_end, 2)
-    for dot in range(54):
-        seed_a = (dot * 37 % 101) / 101
-        seed_r = (dot * 67 % 103) / 103
-        trail = .025 + seed_a * .40
-        angle = sweep_angle - trail
-        dot_radius = radius * math.sqrt(.06 + seed_r * .92)
-        point = (round(center[0] + math.cos(angle) * dot_radius),
-                 round(center[1] + math.sin(angle) * dot_radius))
-        strength = max(0.0, 1.0 - trail / .43)
-        color = (round(12 + 34 * strength), round(43 + 126 * strength),
-                 round(55 + 145 * strength))
-        pygame.draw.circle(surface, color, point, 2 if strength > .72 else 1)
+    pygame.draw.aaline(surface, (55, 179, 220), center, sweep_end)
 
     overhead = data.get("overhead", [])
     satellite_target_hitboxes = {}

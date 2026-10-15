@@ -242,10 +242,9 @@ The `SPACE TRAFFIC` page combines CelesTrak's `VISUAL` and `STATIONS` orbital
 groups. `satellite_telemetry.py` uses Skyfield to calculate current azimuth,
 elevation, slant range, and upcoming passes from the console's local position.
 It also plots visible planets using the cached JPL DE421 ephemeris and up to
-three currently visible stars from a small named bright-star catalog. A slow
-blue acquisition line with a fading cloud of phosphor-persistence dots gives
-the all-sky display useful motion without representing the calculated orbital
-positions as radar returns.
+three currently visible stars from a small named bright-star catalog. A single
+slow, smoothly moving blue acquisition line gives the all-sky display useful
+motion without representing the calculated orbital positions as radar returns.
 
 Every satellite symbol has a 48×48 touchscreen target. Touching a satellite:
 
