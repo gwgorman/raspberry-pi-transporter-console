@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from collections import deque
+from datetime import datetime
 
 import pygame
 
@@ -99,6 +100,22 @@ max_client = None
 max_transport_complete_pending = False
 # Deliberately opt-in: prerecorded MAX lines must not play until Greg approves.
 max_voice_enabled = os.environ.get("STARTREK_MAX_VOICE", "0") == "1"
+max_schedule_override = False
+
+def parse_max_not_before():
+    raw = os.environ.get("STARTREK_MAX_NOT_BEFORE", "").strip()
+    if not raw:
+        return None
+    try:
+        scheduled = datetime.fromisoformat(raw)
+        if scheduled.tzinfo is None:
+            scheduled = scheduled.astimezone()
+        return scheduled.timestamp()
+    except ValueError:
+        print(f"Warning: invalid STARTREK_MAX_NOT_BEFORE value: {raw!r}")
+        return None
+
+MAX_NOT_BEFORE = parse_max_not_before()
 
 def load_console_preferences():
     try:
@@ -1089,9 +1106,18 @@ def max_command_rects(size):
     return {label: pygame.Rect(body.x, body.y + index * (cell_h + gap), body.w, cell_h)
             for index, label in enumerate(labels)}
 
+def max_schedule_pending():
+    return bool(MAX_NOT_BEFORE and not max_schedule_override and time.time() < MAX_NOT_BEFORE)
+
+def max_schedule_label():
+    if not MAX_NOT_BEFORE:
+        return ""
+    return datetime.fromtimestamp(MAX_NOT_BEFORE).strftime("%a %H:%M")
+
 def max_allowed(now=None):
     now = time.monotonic() if now is None else now
-    return bool(max_enabled and party_return_armed() and display_mode == "TRANSPORTER" and
+    return bool(max_enabled and not max_schedule_pending() and
+                party_return_armed() and display_mode == "TRANSPORTER" and
                 not any_sequence_active and ui_state == "READY" and countdown_value is None and
                 shutdown_confirm_until <= now and not shutdown_pending)
 
@@ -1153,15 +1179,19 @@ def draw_max_chrome(surface, now):
     if not party_return_armed() or display_mode != "TRANSPORTER":
         return
     eye = max_eye_rect(surface.get_size())
-    draw_max_eye(surface, eye, max_status.get("phase", "ONLINE") if max_enabled else "LATE WATCH")
-    txt(surface, "ASK MAX" if max_enabled else "MAX DORMANT", eye.h * .19,
+    pending = max_schedule_pending()
+    draw_max_eye(surface, eye, (max_status.get("phase", "ONLINE")
+                               if max_enabled and not pending else "LATE WATCH"))
+    eye_label = "MAX STANDBY" if pending else "ASK MAX" if max_enabled else "MAX DORMANT"
+    txt(surface, eye_label, eye.h * .19,
         CREAM, (eye.centerx, eye.bottom - 5), "midbottom", True)
     jewel = max_status_rect(surface.get_size())
     pygame.draw.rect(surface, BEZEL, jewel, border_radius=4)
     pygame.draw.rect(surface, (4, 12, 13), jewel.inflate(-4, -4), border_radius=3)
     lamp = GREEN if max_allowed(now) else (45, 48, 44)
     pygame.draw.circle(surface, lamp, (jewel.x + 14, jewel.centery), 6)
-    txt(surface, "MAX ACTIVE" if max_enabled else "MAX OFF", jewel.h * .29,
+    jewel_label = f"MAX {max_schedule_label()}" if pending else "MAX ACTIVE" if max_enabled else "MAX OFF"
+    txt(surface, jewel_label, jewel.h * .29,
         CREAM, (jewel.x + 27, jewel.centery), "midleft", True)
     if max_command_hold_started:
         progress = min(1.0, (now - max_command_hold_started) / 5.0)
@@ -1185,7 +1215,10 @@ def draw_max_overlay(surface, now):
         txt(surface, "MAX.SYS COMMAND MODE", body.h * .060, AMBER,
             (body.centerx, body.y + 16), "midtop", True)
         for label, rect in max_command_rects(surface.get_size()).items():
-            subtitle = ("ON" if max_enabled else "OFF") if label == "MAX PARTY MODE" else "PROTECTED CONTROL"
+            if label == "MAX PARTY MODE":
+                subtitle = "START NOW" if max_schedule_pending() else "ON" if max_enabled else "OFF"
+            else:
+                subtitle = "PROTECTED CONTROL"
             button(surface, rect, label, subtitle, GREEN if label == "RETURN TO SHIP" else AMBER)
         return
     kind = max_overlay.get("kind")
@@ -3173,6 +3206,7 @@ def handle_touch(pos, now):
 def handle_max_touch(pos, now):
     """Handle only Max-owned regions; return True when the touch is consumed."""
     global max_menu_open, max_command_open, max_overlay, max_overlay_until, max_enabled
+    global max_schedule_override
     if not max_allowed(now) and not max_command_open:
         return False
     if max_menu_open:
@@ -3192,7 +3226,11 @@ def handle_max_touch(pos, now):
             if not rect.collidepoint(pos):
                 continue
             if label == "MAX PARTY MODE":
-                max_enabled = not max_enabled
+                if max_schedule_pending():
+                    max_schedule_override = True
+                    max_enabled = True
+                else:
+                    max_enabled = not max_enabled
                 save_display_mode()
                 if not max_enabled:
                     dismiss_max()

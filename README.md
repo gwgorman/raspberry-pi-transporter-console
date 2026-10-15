@@ -98,6 +98,14 @@ accent is fake, then snaps back to the bright British voice to insist that it
 is definitely her real voice. The two performances are joined into the single
 private `max_private_accent_confession.wav` asset.
 
+For a one-time event, `STARTREK_MAX_NOT_BEFORE` can hold an ISO 8601 timestamp,
+for example `2026-10-17T19:00:00-05:00`. The kiosk remains fully interactive,
+but MAX.sys shows `MAX STANDBY` and cannot initiate personality events before
+that instant. She activates automatically when the Pi's clock reaches the
+timestamp, including after a reboot. The protected MAX command panel offers
+`START NOW` as a manual override; the ordinary persistent MAX on/off control
+resumes after the scheduled time.
+
 The center-panel **ACOUSTIC FIELD GAIN** control shows `AFG 000` through
 `AFG 100`; at zero it reads `AURAL FIELD MUTED`. It controls PipeWire's current
 default audio sink with `wpctl`, caps gain at 100%, and relies on WirePlumber's
@@ -533,7 +541,10 @@ mkdir -p ~/.config/autostart
 cp startrek.desktop ~/.config/autostart/
 ```
 
-The launcher expects `/home/ggorman/startrek.py`. Change both `Exec` and `Path` to install elsewhere.
+The launcher expects `/home/ggorman/startrek.py`. Change both `Exec` and `Path`
+to install elsewhere. Its checked-in `Exec` line enables the approved private
+MAX.sys recordings and holds personality events until 7:00 PM CDT on October
+17, 2026; remove or update `STARTREK_MAX_NOT_BEFORE` after that one-time event.
 
 On Raspberry Pi OS, the desktop launcher is represented by the generated user
 service `app-startrek@autostart.service`. Useful checks are:
