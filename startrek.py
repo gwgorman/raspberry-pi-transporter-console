@@ -1942,7 +1942,7 @@ def draw_ship_status(surface, now, data):
     wind_mph = float(weather.get("wind_mps") or 0) * 2.23694
     direction = weather.get("wind_direction")
     gauge(surface, (center.x + int(center.w * .72), dial_y), big_radius,
-          min(1, wind_mph / 50), f"WIND {int(direction):03d}°" if direction is not None else "WIND",
+          min(1, wind_mph / 100), f"WIND {int(direction):03d}°" if direction is not None else "WIND",
           CYAN, f"{wind_mph:.0f}", weather_valid and direction is not None)
     meter_y = center.y + int(center.h * .45)
     meter_h = int(h * .065)
