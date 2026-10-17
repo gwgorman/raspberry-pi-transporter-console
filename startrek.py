@@ -438,6 +438,11 @@ for voice_id in ("hello_transporter", "computer_bored", "press_something",
         os.path.join("assets", "audio", f"max_{voice_id}.wav"))
     if sound:
         max_voice_sounds[voice_id] = sound
+for name in os.listdir(BASE_DIR):
+    if name.startswith("max_private_line_") and name.endswith(".wav"):
+        sound = load_sound(name)
+        if sound:
+            max_voice_sounds[name[len("max_private_"):-4]] = sound
 voice_sounds = {}
 for name in os.listdir(BASE_DIR):
     if name.startswith("speak_") and name.endswith(".wav"):

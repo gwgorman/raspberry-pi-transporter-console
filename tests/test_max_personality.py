@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from max_personality import (ATTENTION_MAX_SECONDS, ATTENTION_MIN_SECONDS, CHOICES,
                              CROWD_MAX_SECONDS, CROWD_MIN_SECONDS, EVENT_FLOOR_SECONDS,
-                             MaxEngine, QUIET_WATCH_SECONDS)
+                             MaxEngine, QUIET_WATCH_SECONDS, private_voice_manifest)
 
 
 class MaxPersonalityTests(unittest.TestCase):
@@ -21,6 +21,13 @@ class MaxPersonalityTests(unittest.TestCase):
             event = engine.choice(choice, 110.0)
             self.assertIn(event["kind"], ("response", "bar"))
             self.assertLessEqual(event["duration"], 8.0)
+            self.assertTrue(event["voice"])
+
+    def test_every_text_only_personality_line_has_a_private_voice_id(self):
+        manifest = private_voice_manifest()
+        self.assertGreater(len(manifest), 20)
+        self.assertEqual(len(manifest), len(set(manifest.values())))
+        self.assertTrue(all(key.startswith("line_") for key in manifest))
 
     def test_quiet_watch_replaces_normal_events_and_randomizes_attention(self):
         engine = self.engine()

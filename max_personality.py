@@ -3,6 +3,7 @@
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import random
 import select
@@ -106,6 +107,36 @@ ATTENTION = (
     ("THE CONSOLE IS UNATTENDED. THIS FEELS LIKE AN OPPORTUNITY.", None),
 )
 
+TRANSPORT_COMPLETE_LINES = (
+    "ADDITIONAL LIFEFORM DETECTED. PROBABLY NOTHING.",
+    "ALL PARTICLES ACCOUNTED FOR. PERSONALITY DEFECTS UNCHANGED.",
+    "TRANSPORT COMPLETE. DIGNITY RECOVERY PENDING.",
+)
+SECRET_COOLDOWN_LINE = "YOU ALREADY KNOW TOO MUCH."
+ABORT_COMPLETE_LINE = "CONGRATULATIONS. YOU HAVE SUCCESSFULLY NOT DESTROYED THE GAZEBO."
+
+
+def line_voice_id(text):
+    """Return a stable private-asset ID for a spoken MAX.sys line."""
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+    return f"line_{digest}"
+
+
+def private_voice_manifest():
+    """Return every text-only guest-facing line that needs a private clip."""
+    lines = set()
+    for phases in RESPONSES.values():
+        for bank in phases.values():
+            lines.update(bank)
+    for bank in AMBIENT.values():
+        lines.update(bank)
+    lines.update(text for text, voice in ATTENTION if voice is None)
+    lines.update(TRANSPORT_COMPLETE_LINES)
+    lines.update((SECRET_COOLDOWN_LINE, ABORT_COMPLETE_LINE))
+    # These already have curated named clips.
+    lines.discard("BAR ➜")
+    return {line_voice_id(text): text for text in sorted(lines)}
+
 
 class MaxEngine:
     """Pure state machine; it cannot invoke any transporter operation."""
@@ -184,15 +215,15 @@ class MaxEngine:
         phase = self.phase()
         bank = RESPONSES[choice].get(phase) or RESPONSES[choice].get("DEFAULT")
         text = self._remembered_choice(bank)
-        voice = "that_way" if choice == "WHERE'S THE BAR?" else None
+        voice = "that_way" if choice == "WHERE'S THE BAR?" else line_voice_id(text)
         return {"type": "event", "kind": "bar" if choice == "WHERE'S THE BAR?" else "response",
                 "text": text, "duration": 6.0, "voice": voice, "choice": choice}
 
     def secret(self, now):
         self.activity(now, 5)
         if now < self.secret_ready_at:
-            return {"type": "event", "kind": "response", "text": "YOU ALREADY KNOW TOO MUCH.",
-                    "duration": 4.0, "voice": None}
+            return {"type": "event", "kind": "response", "text": SECRET_COOLDOWN_LINE,
+                    "duration": 4.0, "voice": line_voice_id(SECRET_COOLDOWN_LINE)}
         self.secret_ready_at = now + self.rng.uniform(5 * 60, 8 * 60)
         self.counters["secret"] += 1
         if self.counters["secret"] >= 2:
@@ -207,17 +238,14 @@ class MaxEngine:
         self.activity(now, 1)
         if self.rng.randrange(9):
             return None
-        return {"type": "event", "kind": "response",
-                "text": self._remembered_choice(("ADDITIONAL LIFEFORM DETECTED. PROBABLY NOTHING.",
-                                                  "ALL PARTICLES ACCOUNTED FOR. PERSONALITY DEFECTS UNCHANGED.",
-                                                  "TRANSPORT COMPLETE. DIGNITY RECOVERY PENDING.")),
-                "duration": 6.0, "voice": None}
+        text = self._remembered_choice(TRANSPORT_COMPLETE_LINES)
+        return {"type": "event", "kind": "response", "text": text,
+                "duration": 6.0, "voice": line_voice_id(text)}
 
     def abort_complete(self, now):
         self.activity(now, 1)
-        return {"type": "event", "kind": "response",
-                "text": "CONGRATULATIONS. YOU HAVE SUCCESSFULLY NOT DESTROYED THE GAZEBO.",
-                "duration": 7.0, "voice": None}
+        return {"type": "event", "kind": "response", "text": ABORT_COMPLETE_LINE,
+                "duration": 7.0, "voice": line_voice_id(ABORT_COMPLETE_LINE)}
 
     def tick(self, now):
         if not self.active:
@@ -234,7 +262,7 @@ class MaxEngine:
                 text, voice = self._remembered_choice(ATTENTION)
                 self.last_event = now
                 return {"type": "event", "kind": "attention", "text": text,
-                        "duration": 7.0, "voice": voice}
+                        "duration": 7.0, "voice": voice or line_voice_id(text)}
             if now >= self.next_attention:
                 self.counters["attention"] += 1
                 self.next_attention = now + self.rng.uniform(ATTENTION_MIN_SECONDS,
@@ -242,7 +270,7 @@ class MaxEngine:
                 text, voice = self._remembered_choice(ATTENTION)
                 self.last_event = now
                 return {"type": "event", "kind": "attention", "text": text,
-                        "duration": 7.0, "voice": voice}
+                        "duration": 7.0, "voice": voice or line_voice_id(text)}
             return None
         if now >= self.next_event:
             self.counters["ambient"] += 1
@@ -251,7 +279,7 @@ class MaxEngine:
             text = self._remembered_choice(AMBIENT[phase])
             self.last_event = now
             return {"type": "event", "kind": "ambient", "text": text,
-                    "duration": 5.0, "voice": None}
+                    "duration": 5.0, "voice": line_voice_id(text)}
         return None
 
     def handle(self, message, now=None):
