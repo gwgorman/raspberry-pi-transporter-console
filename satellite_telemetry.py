@@ -22,6 +22,7 @@ SITE_LON = -96.623370
 REFRESH_SECONDS = 2 * 60 * 60
 RETRY_SECONDS = 5 * 60
 PASS_REFRESH_SECONDS = 15 * 60
+PASS_CALCULATION_YIELD_SECONDS = .08
 CACHE_WARNING_SECONDS = 4 * 60 * 60
 CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 CELESTRAK_URLS = (
@@ -277,6 +278,11 @@ class SatelliteTelemetryService:
                         current = None
             except (ValueError, OverflowError):
                 continue
+            # Skyfield pass prediction is deliberately thorough and can use a
+            # full CPU core while walking the visual catalog.  Yield between
+            # spacecraft so a boot-time refresh cannot starve the kiosk UI.
+            if self._stop.wait(PASS_CALCULATION_YIELD_SECONDS):
+                break
         passes.sort(key=lambda item: item["rise"])
         with self._lock:
             self._data["upcoming"] = passes[:12]

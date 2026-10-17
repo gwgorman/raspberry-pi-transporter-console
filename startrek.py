@@ -11,7 +11,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from datetime import datetime
 
 import pygame
@@ -666,10 +666,18 @@ def trigger_self_destruct():
             return
     threading.Thread(target=self_destruct_task, daemon=True).start()
 
+_font_cache = {}
+
 def font(size, bold=False):
-    return pygame.font.SysFont("DejaVu Sans", max(12, int(size)), bold=bold)
+    """Return a cached UI font; font discovery is costly on the Raspberry Pi."""
+    key = (max(12, int(size)), bool(bold))
+    if key not in _font_cache:
+        _font_cache[key] = pygame.font.SysFont("DejaVu Sans", key[0], bold=key[1])
+    return _font_cache[key]
 
 _display_font_cache = {}
+_text_surface_cache = OrderedDict()
+TEXT_SURFACE_CACHE_LIMIT = 512
 
 def display_font(size):
     """Load the bundled OFL display face used only for the transporter masthead."""
@@ -683,15 +691,31 @@ def display_font(size):
                 "DejaVu Sans", pixel_size, bold=True)
     return _display_font_cache[pixel_size]
 
+def rendered_text(value, size, color, bold=False, display=False):
+    """Cache bounded rendered labels; most instrument legends repeat every frame."""
+    value = str(value)
+    pixel_size = max(12, int(size))
+    key = (value, pixel_size, tuple(color), bool(bold), bool(display))
+    image = _text_surface_cache.get(key)
+    if image is not None:
+        _text_surface_cache.move_to_end(key)
+        return image
+    face = display_font(pixel_size) if display else font(pixel_size, bold)
+    image = face.render(value, True, color)
+    _text_surface_cache[key] = image
+    if len(_text_surface_cache) > TEXT_SURFACE_CACHE_LIMIT:
+        _text_surface_cache.popitem(last=False)
+    return image
+
 def txt(surface, value, size, color, pos, anchor="topleft", bold=False):
-    image = font(size, bold).render(str(value), True, color)
+    image = rendered_text(value, size, color, bold)
     rect = image.get_rect()
     setattr(rect, anchor, pos)
     surface.blit(image, rect)
     return rect
 
 def display_txt(surface, value, size, color, pos, anchor="topleft"):
-    image = display_font(size).render(str(value), True, color)
+    image = rendered_text(value, size, color, display=True)
     rect = image.get_rect()
     setattr(rect, anchor, pos)
     surface.blit(image, rect)
@@ -3458,7 +3482,13 @@ try:
         if shutdown_confirm_until > now or shutdown_pending:
             draw_shutdown_confirmation(screen, now)
         pygame.display.flip()
-        clock.tick(60)
+        # The Pi renders this 1920x1080 instrument panel in software.  Use a
+        # calm idle cadence for the retro gauges and reserve the faster rate
+        # for sequences and MAX overlays that benefit from smoother motion.
+        presentation_active = bool(any_sequence_active or ui_state != "READY" or
+                                   countdown_value is not None or max_menu_open or
+                                   max_command_open or max_overlay)
+        clock.tick(24 if presentation_active else 12)
 finally:
     running = False
     afg_event.set()
