@@ -1166,7 +1166,9 @@ def update_max(now):
     if max_overlay and now >= max_overlay_until:
         max_overlay = None
 
-def draw_max_eye(surface, rect, phase="ONLINE", large=False):
+def draw_max_eye(surface, rect, phase="ONLINE", large=False, now=None):
+    """Draw MAX's animated mechanical eye with an obvious, smooth gaze."""
+    now = time.monotonic() if now is None else now
     colors = {"ONLINE": CYAN, "CURIOUS": GREEN, "PLAYFUL": AMBER,
               "UNFILTERED": ORANGE, "LATE WATCH": BLUE}
     color = colors.get(phase, CYAN)
@@ -1175,10 +1177,30 @@ def draw_max_eye(surface, rect, phase="ONLINE", large=False):
     pygame.draw.ellipse(surface, (2, 9, 12), inner)
     pygame.draw.ellipse(surface, color, inner, max(2, rect.h // 18))
     pupil_r = max(7, int(rect.h * (.25 if large else .20)))
-    pygame.draw.circle(surface, color, inner.center, pupil_r)
-    pygame.draw.circle(surface, BLACK, inner.center, max(3, pupil_r // 2))
-    pygame.draw.circle(surface, WHITE, (inner.centerx - pupil_r // 3,
-                                        inner.centery - pupil_r // 3), max(2, pupil_r // 7))
+    # Two slightly different periods keep the gaze lively without looking
+    # frantic or mechanically repetitive.  Travel is deliberately broad so
+    # it remains visible across the gazebo on the 1920x1080 display.
+    travel_x = max(5, int((inner.w / 2 - pupil_r - 5) * .72))
+    travel_y = max(3, int((inner.h / 2 - pupil_r - 4) * .66))
+    gaze_x = int(math.sin(now * 1.05) * travel_x + math.sin(now * .37 + .8) * travel_x * .22)
+    gaze_y = int(math.sin(now * 1.43 + 1.1) * travel_y)
+    iris = (inner.centerx + gaze_x, inner.centery + gaze_y)
+    pygame.draw.circle(surface, color, iris, pupil_r)
+    pygame.draw.circle(surface, BLACK, iris, max(3, pupil_r // 2))
+    pygame.draw.circle(surface, WHITE, (iris[0] - pupil_r // 3,
+                                        iris[1] - pupil_r // 3), max(2, pupil_r // 7))
+    # A brief double eyelid pass every few seconds makes the eye read as alive
+    # even when its horizontal motion happens to be near a turning point.
+    blink = now % 5.7
+    if 5.42 < blink < 5.66:
+        openness = abs(blink - 5.54) / .12
+        lid_h = int(inner.h * .48 * (1.0 - min(1.0, openness)))
+        if lid_h > 0:
+            pygame.draw.ellipse(surface, (2, 9, 12),
+                                pygame.Rect(inner.x, inner.y, inner.w, lid_h * 2))
+            pygame.draw.ellipse(surface, (2, 9, 12),
+                                pygame.Rect(inner.x, inner.bottom - lid_h * 2,
+                                            inner.w, lid_h * 2))
 
 def draw_max_chrome(surface, now):
     if not party_return_armed() or display_mode != "TRANSPORTER":
@@ -1186,7 +1208,7 @@ def draw_max_chrome(surface, now):
     eye = max_eye_rect(surface.get_size())
     pending = max_schedule_pending()
     draw_max_eye(surface, eye, (max_status.get("phase", "ONLINE")
-                               if max_enabled and not pending else "LATE WATCH"))
+                               if max_enabled and not pending else "LATE WATCH"), now=now)
     eye_label = "MAX STANDBY" if pending else "ASK MAX" if max_enabled else "MAX DORMANT"
     txt(surface, eye_label, eye.h * .19,
         CREAM, (eye.centerx, eye.bottom - 5), "midbottom", True)
@@ -1232,7 +1254,7 @@ def draw_max_overlay(surface, now):
         elapsed = max(0.0, max_overlay_until - now)
         eye = pygame.Rect(body.centerx - int(body.h * .18), body.y + 45,
                           int(body.h * .36), int(body.h * .20))
-        draw_max_eye(surface, eye, phase, True)
+        draw_max_eye(surface, eye, phase, True, now)
         lines = ("HELLO.", "YOU FOUND ME.", "I'M MAX.", "PLEASE DON'T TELL THE CAPTAIN.")
         visible = min(4, max(1, int((8.0 - elapsed) / 1.6) + 1))
         for index, line in enumerate(lines[:visible]):
@@ -1245,7 +1267,7 @@ def draw_max_overlay(surface, now):
             (body.centerx, body.bottom - 55), "center", True)
     else:
         eye = pygame.Rect(body.centerx - 90, body.y + 55, 180, 82)
-        draw_max_eye(surface, eye, phase)
+        draw_max_eye(surface, eye, phase, now=now)
         wrapped = []
         words = text.split()
         line = ""
