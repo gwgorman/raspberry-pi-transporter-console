@@ -1937,7 +1937,7 @@ def draw_ship_status(surface, now, data):
     big_radius = int(min(center.w * .15, center.h * .14))
     dial_y = center.y + int(center.h * .25)
     gauge(surface, (center.x + int(center.w * .28), dial_y), big_radius,
-          max(0, min(1, (float(air_f or 0) + 10) / 130)), "AIR TEMP °F", AMBER,
+          max(0, min(1, float(air_f or 0) / 100)), "AIR TEMP °F", AMBER,
           f"{air_f:.0f}" if air_f is not None else "—", weather_valid)
     wind_mph = float(weather.get("wind_mps") or 0) * 2.23694
     direction = weather.get("wind_direction")
