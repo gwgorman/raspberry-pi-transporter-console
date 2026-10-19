@@ -1,5 +1,12 @@
 # Raspberry Pi Transporter Console
 
+> **Project direction:** the transporter console remains fully supported as a
+> legacy interactive page, but it is no longer the planned party landing
+> experience. The next party mode is **Madame Maxime's fortune-telling
+> pavilion**. Office telemetry and the existing MAX.sys personality remain
+> available. See [Next Party: Madame Maxime](docs/NEXT_PARTY_FORTUNE_TELLER.md)
+> for the migration plan and hardware-independent development sequence.
+
 A full-screen, touch-first sci-fi transporter console built for a Halloween party. It turns a Raspberry Pi, a 1080p touchscreen, and a speaker into an interactive prop with animated gauges, pattern-buffer displays, sound effects, and an intentionally overdramatic self-destruct sequence.
 
 Designed and built by Greg Gorman with Max (OpenAI Codex).
@@ -52,6 +59,19 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
   15-minute Quiet Watch attention behavior
 
 The touchscreen is the primary interface. Physical arcade buttons are optional.
+
+## Supported experiences
+
+- **Madame Maxime** — planned default party experience and future boot target.
+- **Office telemetry** — the current unattended everyday display.
+- **Transporter** — preserved on request as a complete playable legacy page,
+  including ENERGIZE, self-destruct, audio, GPIO, and keyboard controls.
+- **MAX.sys** — preserved as a reusable personality module; its scheduling,
+  guarded controls, voice-asset lookup, and interruption rules are intended to
+  inform the fortune-teller implementation.
+
+Until Madame Maxime reaches a tested release, the deployed Raspberry Pi keeps
+launching the known-good console and should normally be left in Office mode.
 
 ## MAX.sys party personality
 
@@ -109,6 +129,10 @@ that instant. She activates automatically when the Pi's clock reaches the
 timestamp, including after a reboot. The protected MAX command panel offers
 `START NOW` as a manual override; the ordinary persistent MAX on/off control
 resumes after the scheduled time.
+
+The October 17, 2026 activation gate has been retired from the installed
+desktop launcher. MAX.sys remains available whenever the console is placed in
+Party behavior; future dated activations can still use the variable above.
 
 The center-panel **ACOUSTIC FIELD GAIN** control shows `AFG 000` through
 `AFG 100`; at zero it reads `AURAL FIELD MUTED`. It controls PipeWire's current
@@ -547,8 +571,8 @@ cp startrek.desktop ~/.config/autostart/
 
 The launcher expects `/home/ggorman/startrek.py`. Change both `Exec` and `Path`
 to install elsewhere. Its checked-in `Exec` line enables the approved private
-MAX.sys recordings and holds personality events until 7:00 PM CDT on October
-17, 2026; remove or update `STARTREK_MAX_NOT_BEFORE` after that one-time event.
+MAX.sys recordings. Add `STARTREK_MAX_NOT_BEFORE` only for a future one-time
+scheduled activation.
 
 On Raspberry Pi OS, the desktop launcher is represented by the generated user
 service `app-startrek@autostart.service`. Useful checks are:
