@@ -59,19 +59,24 @@ FTDI FT232R serial device:
 
 - USB vendor/product: `0403:6001`
 - FTDI serial: `BG00UVK9`
-- current kernel node: `/dev/ttyUSB0`
-- stable application path:
-  `/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_BG00UVK9-if00-port0`
+- normal kernel node: `/dev/ttyUSB0` when the direct driver is idle
 - device ownership: `root:plugdev`, mode `0660` plus desktop ACL
 - kiosk user groups include both `plugdev` and `dialout`
-- PySerial 3.5 is already installed on the Pi
+- `libftdi1-2` and `python3-usb` are installed on the Pi
 
-No process currently holds the serial port. Future lighting code must use the
-stable `by-id` path, fail silently when it is absent, and never prevent the
-touchscreen application from starting. This is an Open DMX interface rather
-than a framed DMX USB Pro device: the eventual adapter must continuously emit
+This is an Open DMX interface rather than a framed DMX USB Pro device: the
+lighting adapter must continuously emit
 the DMX512 break, mark-after-break, start code, and channel frame. Merely
 opening the serial port does not prove that a fixture received valid DMX.
+
+The complete physical chain was verified on October 19, 2026. QLC+ 5 on macOS
+detected FTDI serial `BG00UVK9` and drove the A030 fixture red, green, and blue.
+On the Pi, both OLA and the ordinary `/dev/ttyUSB0`/PySerial path failed to
+produce a stream accepted by the same fixture. Direct `libftdi` control worked
+both as root and as the normal `ggorman` kiosk user. `dmx_lighting.py` therefore
+claims this one USB interface through PyUSB, detaches `ftdi_sio` while active,
+transmits through `libftdi`, and restores the kernel driver when stopped. OLA
+must remain disabled so it cannot race the application for the adapter.
 
 The two existing PAR fixtures are configured with DMX starting addresses
 **1** and **30**. Treat these as installation defaults. Their selected fixture
@@ -87,14 +92,14 @@ The verified LauceNatz 36LED PAR channel map is:
 5. strobe, with 0-9 meaning no strobe;
 6. program selector, with 0-50 meaning no program.
 
-`dmx_lighting.py` provides the failure-isolated Open DMX transmitter and maps
+`dmx_lighting.py` provides the failure-isolated direct-FTDI Open DMX transmitter and maps
 both installed fixtures. Static scenes force channels 5 and 6 to zero so they
 cannot unexpectedly enable strobe, hopping, fading, pulse, auto, or sound
 mode. Its manual test sequence starts with blackout, exercises low-level RGBW
 on each fixture separately, and can leave both fixtures in dim warm amber.
 
-The adapter was enumerated read-only during this check. No DMX values were
-transmitted, so the existing kiosk and any connected fixtures were not changed.
+The installed A030 fixture was physically verified with solid red, green, and
+blue output. Tests ended with a blackout frame.
 
 ## Build safely before the hardware arrives
 
