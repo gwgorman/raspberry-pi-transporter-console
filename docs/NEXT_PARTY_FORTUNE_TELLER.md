@@ -73,6 +73,13 @@ than a framed DMX USB Pro device: the eventual adapter must continuously emit
 the DMX512 break, mark-after-break, start code, and channel frame. Merely
 opening the serial port does not prove that a fixture received valid DMX.
 
+The two existing PAR fixtures are configured with DMX starting addresses
+**1** and **30**. Treat these as installation defaults. Their selected fixture
+mode and exact channel maps must still be verified from the manual and with a
+low-level test before assigning color, dimmer, strobe, or macro functions.
+The address separation is intentionally generous so their channel footprints
+cannot overlap during discovery.
+
 The adapter was enumerated read-only during this check. No DMX values were
 transmitted, so the existing kiosk and any connected fixtures were not changed.
 
