@@ -51,6 +51,31 @@ Exact device names, USB identities, audio routing, camera formats, sensor
 address, and light-control capability must be discovered on the real hardware.
 Do not hard-code assumptions before it arrives.
 
+### Verified ENTTEC Open DMX USB interface
+
+The ENTTEC adapter was connected to the production Raspberry Pi and identified
+on October 19, 2026. Linux binds it to the in-kernel `ftdi_sio` driver as an
+FTDI FT232R serial device:
+
+- USB vendor/product: `0403:6001`
+- FTDI serial: `BG00UVK9`
+- current kernel node: `/dev/ttyUSB0`
+- stable application path:
+  `/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_BG00UVK9-if00-port0`
+- device ownership: `root:plugdev`, mode `0660` plus desktop ACL
+- kiosk user groups include both `plugdev` and `dialout`
+- PySerial 3.5 is already installed on the Pi
+
+No process currently holds the serial port. Future lighting code must use the
+stable `by-id` path, fail silently when it is absent, and never prevent the
+touchscreen application from starting. This is an Open DMX interface rather
+than a framed DMX USB Pro device: the eventual adapter must continuously emit
+the DMX512 break, mark-after-break, start code, and channel frame. Merely
+opening the serial port does not prove that a fixture received valid DMX.
+
+The adapter was enumerated read-only during this check. No DMX values were
+transmitted, so the existing kiosk and any connected fixtures were not changed.
+
 ## Build safely before the hardware arrives
 
 1. Keep a recoverable snapshot of the known-good deployed kiosk.
