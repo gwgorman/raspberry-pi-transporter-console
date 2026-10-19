@@ -7,6 +7,20 @@
 > available. See [Next Party: Madame Maxime](docs/NEXT_PARTY_FORTUNE_TELLER.md)
 > for the migration plan and hardware-independent development sequence.
 
+The successor systems now have separate homes:
+
+- [Madame Maxime Fortune-Teller Kiosk](https://github.com/gwgorman/madame-maxime-fortune-teller-kiosk)
+  — the next public party-kiosk project.
+- [Gorman Office Console](https://github.com/gwgorman/gorman-office-console)
+  — the private standalone household telemetry display.
+- [MAX.sys](https://github.com/gwgorman/max-sys)
+  — the public reusable personality and event engine.
+
+This repository remains the stable legacy Transporter and the behavior/source
+reference during extraction. Components move only after parity testing; the
+production Pi continues to launch this known-good application until its
+successors qualify independently.
+
 A full-screen, touch-first sci-fi transporter console built for a Halloween party. It turns a Raspberry Pi, a 1080p touchscreen, and a speaker into an interactive prop with animated gauges, pattern-buffer displays, sound effects, and an intentionally overdramatic self-destruct sequence.
 
 Designed and built by Greg Gorman with Max (OpenAI Codex).
