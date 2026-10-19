@@ -75,10 +75,23 @@ opening the serial port does not prove that a fixture received valid DMX.
 
 The two existing PAR fixtures are configured with DMX starting addresses
 **1** and **30**. Treat these as installation defaults. Their selected fixture
-mode and exact channel maps must still be verified from the manual and with a
-low-level test before assigning color, dimmer, strobe, or macro functions.
-The address separation is intentionally generous so their channel footprints
-cannot overlap during discovery.
+mode is the documented six-channel mode. The address separation is
+intentionally generous, so the two channel footprints do not overlap.
+
+The verified LauceNatz 36LED PAR channel map is:
+
+1. master brightness, 0-255;
+2. red, 0-255;
+3. green, 0-255;
+4. blue, 0-255;
+5. strobe, with 0-9 meaning no strobe;
+6. program selector, with 0-50 meaning no program.
+
+`dmx_lighting.py` provides the failure-isolated Open DMX transmitter and maps
+both installed fixtures. Static scenes force channels 5 and 6 to zero so they
+cannot unexpectedly enable strobe, hopping, fading, pulse, auto, or sound
+mode. Its manual test sequence starts with blackout, exercises low-level RGBW
+on each fixture separately, and can leave both fixtures in dim warm amber.
 
 The adapter was enumerated read-only during this check. No DMX values were
 transmitted, so the existing kiosk and any connected fixtures were not changed.
