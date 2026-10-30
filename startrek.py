@@ -2965,9 +2965,9 @@ def draw_satellite_status(surface, now, data):
     txt(surface, "ZENITH", h * .010, WHITE, (center[0] + 8, center[1] + 5), bold=True)
     starlink_count = int(data.get("starlink_above_count") or 0)
     txt(surface, f"SAT {len(overhead):02d}  •  STARLINK {starlink_count:03d}  •  PLANETS {len(data.get('planets', [])):02d}  •  CATALOG {int(data.get('catalog_count') or 0):03d}",
-        h * .014, link_color,
-        (sky_panel.centerx, sky_panel.bottom - 14), "midbottom", True)
-    txt(surface, "● SATELLITE    • STARLINK    ◇ PLANET    + BRIGHT STAR", h * .011, MUTED,
+        h * .011, link_color,
+        (sky_panel.right - 17, sky_panel.bottom - 14), "bottomright", True)
+    txt(surface, "● SAT    • STARLINK    ◇ PLANET    + STAR", h * .010, MUTED,
         (sky_panel.x + 17, sky_panel.bottom - 14), "bottomleft", True)
     if hard_fault:
         invalid_data_flag(surface, pygame.Rect(center[0] - radius, center[1] - radius,
