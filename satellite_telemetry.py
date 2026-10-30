@@ -23,12 +23,16 @@ REFRESH_SECONDS = 2 * 60 * 60
 RETRY_SECONDS = 5 * 60
 PASS_REFRESH_SECONDS = 15 * 60
 PASS_CALCULATION_YIELD_SECONDS = .08
+STARLINK_POSITION_SECONDS = 5.0
+STARLINK_BATCH_SIZE = 300
+STARLINK_DISPLAY_LIMIT = 20
 CACHE_WARNING_SECONDS = 4 * 60 * 60
 CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 CELESTRAK_URLS = (
     "https://celestrak.org/NORAD/elements/gp.php?GROUP=VISUAL&FORMAT=TLE",
     "https://celestrak.org/NORAD/elements/gp.php?GROUP=STATIONS&FORMAT=TLE",
 )
+STARLINK_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=STARLINK&FORMAT=TLE"
 SATCAT_URLS = (
     "https://celestrak.org/satcat/records.php?GROUP=VISUAL&FORMAT=JSON",
     "https://celestrak.org/satcat/records.php?GROUP=STATIONS&FORMAT=JSON",
@@ -116,10 +120,14 @@ class SatelliteTelemetryService:
             os.path.expanduser("~"), ".cache", "startrek-console")
         self.cache_path = os.path.join(self.cache_dir, "celestrak-visual-stations.tle")
         self.metadata_path = os.path.join(self.cache_dir, "celestrak-satcat.json")
+        self.starlink_cache_path = os.path.join(self.cache_dir, "celestrak-starlink.tle")
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread = None
         self._satellites = []
+        self._starlinks = []
+        self._starlink_cursor = 0
+        self._starlink_positions = {}
         self._metadata = {}
         self._ts = None
         self._observer = None
@@ -129,6 +137,9 @@ class SatelliteTelemetryService:
             "updated": 0.0, "catalog_updated": 0.0, "connected": False,
             "error": "STARTING", "catalog_count": 0, "overhead": [], "upcoming": [],
             "retry_at": 0.0,
+            "starlink_catalog_count": 0, "starlink_above_count": 0,
+            "starlink_overhead": [], "starlink_updated": 0.0,
+            "starlink_catalog_updated": 0.0, "starlink_error": "STARTING",
             "site": {"lat": SITE_LAT, "lon": SITE_LON},
             "planets": [], "stars": [], "celestial_error": "STARTING",
         }
@@ -168,6 +179,51 @@ class SatelliteTelemetryService:
             return stamp
         except OSError:
             return 0.0
+
+    def _load_starlink_records(self, text, stamp):
+        records = _dedupe_records(_tle_records(text))
+        if not records:
+            raise ValueError("CelesTrak returned no complete Starlink TLE records")
+        self._starlinks = [EarthSatellite(line1, line2, name, self._ts)
+                           for name, line1, line2, _catalog_id in records]
+        self._starlink_cursor = 0
+        self._starlink_positions = {}
+        with self._lock:
+            self._data.update(starlink_catalog_updated=stamp,
+                              starlink_catalog_count=len(self._starlinks),
+                              starlink_error="")
+
+    def _load_starlink_cache(self):
+        try:
+            stamp = os.path.getmtime(self.starlink_cache_path)
+            with open(self.starlink_cache_path, encoding="utf-8") as cache_file:
+                self._load_starlink_records(cache_file.read(), stamp)
+            return stamp
+        except (OSError, ValueError) as exc:
+            with self._lock:
+                self._data["starlink_error"] = str(exc)
+            return 0.0
+
+    def _refresh_starlink_catalog(self):
+        text = _download_text(STARLINK_URL, timeout=30)
+        records = _dedupe_records(_tle_records(text))
+        if not records:
+            raise ValueError("CelesTrak returned an empty Starlink catalog")
+        normalized = "\n".join("\n".join(record[:3]) for record in records) + "\n"
+        os.makedirs(self.cache_dir, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(prefix="starlink-", suffix=".tle",
+                                                 dir=self.cache_dir, text=True)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as cache_file:
+                cache_file.write(normalized)
+            os.replace(temporary, self.starlink_cache_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        stamp = time.time()
+        os.utime(self.starlink_cache_path, (stamp, stamp))
+        self._load_starlink_records(normalized, stamp)
+        return stamp
 
     def _refresh_catalog(self):
         chunks = [_download_text(url) for url in CELESTRAK_URLS]
@@ -250,6 +306,43 @@ class SatelliteTelemetryService:
             self._data.update(updated=time.time(), overhead=overhead, planets=planets,
                               stars=stars, connected=True)
 
+    def _starlink_position_batch(self):
+        """Spread the large constellation calculation over short, cool batches."""
+        if not self._starlinks:
+            return
+        now = self._ts.now()
+        start = self._starlink_cursor
+        stop = min(start + STARLINK_BATCH_SIZE, len(self._starlinks))
+        for satellite in self._starlinks[start:stop]:
+            catalog_id = str(satellite.model.satnum)
+            self._starlink_positions.pop(catalog_id, None)
+            try:
+                altitude, azimuth, distance = (satellite - self._observer).at(now).altaz()
+                elevation = float(altitude.degrees)
+                if elevation > 0:
+                    self._starlink_positions[catalog_id] = {
+                        "name": satellite.name,
+                        "catalog_id": catalog_id,
+                        "azimuth": float(azimuth.degrees),
+                        "elevation": elevation,
+                        "range_km": float(distance.km),
+                        "kind": "starlink",
+                    }
+            except (ValueError, OverflowError):
+                continue
+        self._starlink_cursor = stop
+        if stop < len(self._starlinks):
+            return
+
+        self._starlink_cursor = 0
+        overhead = sorted(self._starlink_positions.values(),
+                          key=lambda item: (item["elevation"], -item["range_km"]),
+                          reverse=True)
+        with self._lock:
+            self._data.update(starlink_above_count=len(overhead),
+                              starlink_overhead=copy.deepcopy(overhead[:STARLINK_DISPLAY_LIMIT]),
+                              starlink_updated=time.time(), starlink_error="")
+
     def _passes(self):
         start = self._ts.now()
         end = self._ts.from_datetime(dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=12))
@@ -306,15 +399,20 @@ class SatelliteTelemetryService:
                 with self._lock:
                     self._data["celestial_error"] = str(exc)
             catalog_stamp = self._load_cache()
+            starlink_catalog_stamp = self._load_starlink_cache()
             if self._satellites:
                 with self._lock:
                     self._data.update(connected=True, error="")
         except (OSError, ValueError) as exc:
             catalog_stamp = 0.0
+            starlink_catalog_stamp = 0.0
             with self._lock:
                 self._data["error"] = str(exc)
         next_catalog_refresh = (catalog_stamp + REFRESH_SECONDS
                                 if self._satellites and self._metadata else 0.0)
+        next_starlink_catalog_refresh = (starlink_catalog_stamp + REFRESH_SECONDS
+                                         if self._starlinks else 0.0)
+        next_starlink_position = 0.0
         next_pass_refresh = 0.0
         while not self._stop.is_set():
             now = time.time()
@@ -330,6 +428,21 @@ class SatelliteTelemetryService:
                     with self._lock:
                         self._data.update(error=str(exc), connected=bool(self._satellites),
                                           retry_at=next_catalog_refresh)
+            if now >= next_starlink_catalog_refresh:
+                try:
+                    starlink_catalog_stamp = self._refresh_starlink_catalog()
+                    next_starlink_catalog_refresh = now + REFRESH_SECONDS
+                    next_starlink_position = 0.0
+                except (OSError, ValueError, urllib.error.URLError) as exc:
+                    # CelesTrak uses 403 responses to enforce its duplicate-query
+                    # interval.  Respect that signal instead of retrying every
+                    # five minutes and extending the rate-limit window.
+                    rate_limited = (isinstance(exc, urllib.error.HTTPError)
+                                    and exc.code == 403)
+                    next_starlink_catalog_refresh = now + (REFRESH_SECONDS
+                                                            if rate_limited else RETRY_SECONDS)
+                    with self._lock:
+                        self._data["starlink_error"] = str(exc)
             if self._satellites:
                 try:
                     self._positions()
@@ -339,4 +452,11 @@ class SatelliteTelemetryService:
                 except (OSError, ValueError, OverflowError) as exc:
                     with self._lock:
                         self._data.update(error=str(exc), connected=False)
+            if self._starlinks and now >= next_starlink_position:
+                try:
+                    self._starlink_position_batch()
+                    next_starlink_position = now + STARLINK_POSITION_SECONDS
+                except (OSError, ValueError, OverflowError) as exc:
+                    with self._lock:
+                        self._data["starlink_error"] = str(exc)
             self._stop.wait(5.0)

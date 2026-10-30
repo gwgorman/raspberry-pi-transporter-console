@@ -2068,16 +2068,24 @@ def draw_ship_status(surface, now, data):
     mqtt_info = data.get("mqtt", {})
     small_h = int(h * .068)
     wine = house.get("wine_cellar", {})
-    keg = house.get("keg", {})
+    # The retired SmartThings keg must never supply this card.
+    keg_sensors = (yolink.snapshot() if yolink else {}).get("temperature_sensors", [])
+    keg = next((sensor for sensor in keg_sensors
+                if sensor.get("name", "").strip().casefold() == "kegerator"), {})
+    keg_updated = keg.get("reported_at")
+    keg_fresh = bool(keg_updated and time.time() - keg_updated < 3600
+                     and keg.get("online") is not False)
+    keg_temp = keg.get("temperature_f")
+    keg_humidity = keg.get("humidity")
     telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
                    "WINE CELLAR CLIMATE", f"{wine.get('temperature_f', '—')} °F  {wine.get('humidity', '—')}%",
                    data_age(wine.get("updated"))[0], CYAN, bool(wine.get("updated")),
                    bool(wine.get("updated") and time.time() - wine["updated"] < 3600))
     aux_y += small_h + 7
     telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
-                   "KEG THERMAL", f"{keg.get('temperature_f', '—')} °F  {keg.get('humidity', '—')}%",
-                   data_age(keg.get("updated"))[0], AMBER, bool(keg.get("updated")),
-                   bool(keg.get("updated") and time.time() - keg["updated"] < 3600))
+                   "KEGERATOR", f"{keg_temp if keg_temp is not None else '—'} °F  {keg_humidity if keg_humidity is not None else '—'}%",
+                   data_age(keg_updated)[0], AMBER, keg_temp is not None,
+                   keg_fresh)
     aux_y += small_h + 7
     left_door_data = house.get("garage_left", {})
     right_door_data = house.get("garage_right", {})
@@ -2419,7 +2427,8 @@ def draw_house_status(surface, now, data):
 
 def battery_inventory(telemetry_data, yolink_data):
     """Combine battery-capable sources without pretending old readings are live."""
-    items = [dict(item) for item in telemetry_data.get("house", {}).get("batteries", {}).values()]
+    items = [dict(item) for item in telemetry_data.get("house", {}).get("batteries", {}).values()
+             if item.get("name", "").strip().casefold() not in {"keg", "old keg"}]
     for sensor in yolink_data.get("temperature_sensors", []):
         level = sensor.get("battery")
         if level is not None:
@@ -2902,7 +2911,19 @@ def draw_satellite_status(surface, now, data):
     pygame.draw.aaline(surface, (55, 179, 220), center, sweep_end)
 
     overhead = data.get("overhead", [])
+    starlinks = data.get("starlink_overhead", [])
     satellite_target_hitboxes = {}
+    # Starlinks are a deliberately curated phosphor layer.  The telemetry
+    # service tracks the full constellation but only sends the highest few to
+    # the renderer, keeping this plot legible and the Pi responsive.
+    for index, satellite in enumerate(starlinks):
+        point = _satellite_point(center, radius, satellite.get("azimuth", 0),
+                                 satellite.get("elevation", 0))
+        pygame.draw.circle(surface, (18, 55, 48), point, 5)
+        pygame.draw.circle(surface, (104, 238, 181), point, 2)
+        if index < 3:
+            txt(surface, satellite.get("name", "STARLINK")[:16], h * .0085,
+                (104, 238, 181), (point[0] + 7, point[1] + 5), bold=True)
     for index, satellite in enumerate(overhead):
         point = _satellite_point(center, radius, satellite.get("azimuth", 0),
                                  satellite.get("elevation", 0))
@@ -2942,10 +2963,11 @@ def draw_satellite_status(surface, now, data):
             (point[0] + 8, point[1] - 5), bold=True)
     pygame.draw.circle(surface, WHITE, center, 4)
     txt(surface, "ZENITH", h * .010, WHITE, (center[0] + 8, center[1] + 5), bold=True)
-    txt(surface, f"SAT {len(overhead):02d}  •  PLANETS {len(data.get('planets', [])):02d}  •  CATALOG {int(data.get('catalog_count') or 0):03d}",
+    starlink_count = int(data.get("starlink_above_count") or 0)
+    txt(surface, f"SAT {len(overhead):02d}  •  STARLINK {starlink_count:03d}  •  PLANETS {len(data.get('planets', [])):02d}  •  CATALOG {int(data.get('catalog_count') or 0):03d}",
         h * .014, link_color,
         (sky_panel.centerx, sky_panel.bottom - 14), "midbottom", True)
-    txt(surface, "● SATELLITE    ◇ PLANET    + BRIGHT STAR", h * .011, MUTED,
+    txt(surface, "● SATELLITE    • STARLINK    ◇ PLANET    + BRIGHT STAR", h * .011, MUTED,
         (sky_panel.x + 17, sky_panel.bottom - 14), "bottomleft", True)
     if hard_fault:
         invalid_data_flag(surface, pygame.Rect(center[0] - radius, center[1] - radius,
@@ -3021,7 +3043,8 @@ def draw_satellite_status(surface, now, data):
         elevation = orbit_pass.get("max_elevation")
         txt(surface, f"{elevation:.0f}°" if elevation is not None else "—",
             rect.h * .23, AMBER, (rect.right - 9, rect.centery), "midright", True)
-    txt(surface, f"CELESTRAK VISUAL + STATIONS  •  ELEMENTS {compact_age(data.get('catalog_updated'))}",
+    starlink_age = compact_age(data.get("starlink_updated")) if data.get("starlink_updated") else "LOADING"
+    txt(surface, f"CELESTRAK VISUAL + STATIONS + STARLINK  •  STARLINK {starlink_age}",
         h * .011, MUTED, (list_panel.centerx, list_panel.bottom - 9), "midbottom", True)
 
 def draw_sad_mac(surface):

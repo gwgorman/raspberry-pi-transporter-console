@@ -7,6 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from satellite_telemetry import (
     CACHE_MAX_AGE_SECONDS,
     CACHE_WARNING_SECONDS,
+    STARLINK_BATCH_SIZE,
+    STARLINK_DISPLAY_LIMIT,
     _dedupe_records,
     _tle_records,
     catalog_condition,
@@ -23,6 +25,10 @@ HUBBLE SPACE TELESCOPE
 
 
 class SatelliteTelemetryTests(unittest.TestCase):
+    def test_starlink_work_is_bounded_for_kiosk_responsiveness(self):
+        self.assertLessEqual(STARLINK_BATCH_SIZE, 300)
+        self.assertLessEqual(STARLINK_DISPLAY_LIMIT, 20)
+
     def test_tle_parser_extracts_complete_named_records(self):
         records = _tle_records(SAMPLE)
         self.assertEqual([record[3] for record in records], ["25544", "20580"])

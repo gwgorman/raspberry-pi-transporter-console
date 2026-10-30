@@ -64,7 +64,8 @@ Designed and built by Greg Gorman with Max (OpenAI Codex).
 - Local PiAware air-traffic radar with an expanded near-field projection, flight strips,
   and optional NEXRAD overlay
 - CelesTrak orbital plot with touch-selectable overhead objects, paged/pinnable flight strips,
-  predicted passes, launch metadata, flags, planets, bright stars, and a slow phosphor sweep
+  predicted passes, launch metadata, flags, planets, bright stars, a curated live Starlink
+  layer, and a slow phosphor sweep
 - Full-screen 1920×1080 kiosk layout that scales to other resolutions
 - Optional physical green and red buttons through Raspberry Pi GPIO
 - Keyboard test mode and automatic desktop launch
@@ -188,10 +189,12 @@ It does not publish MQTT messages or control any device.
 The five-position display selector provides `TRANSPORTER`, `SHIP STATUS`,
 `AIR TRAFFIC`, `SPACE TRAFFIC`, and `AUTO` as top-level modes. Ship Status is
 subdivided into `CORE & WEATHER`, `ROOM SENSORS`, `HOUSE SYSTEMS`, and
-`POWER CELLS`. Space Traffic downloads CelesTrak's public visual and space-
-station TLE groups, caches them in `~/.cache/startrek-console`, and refreshes
-them no more frequently than every two hours. No Space-Track credentials are
-required for this view. Skyfield also caches the JPL DE421 planetary ephemeris
+`POWER CELLS`. Space Traffic downloads CelesTrak's public visual, space-station,
+and Starlink TLE groups, caches them in `~/.cache/startrek-console`, and refreshes
+them no more frequently than every two hours. The full Starlink constellation is
+processed in small batches, while only the 20 highest objects are drawn and a
+separate counter reports every Starlink currently above the horizon. No
+Space-Track credentials are required for this view. Skyfield also caches the JPL DE421 planetary ephemeris
 and plots locally visible planets plus the three brightest currently visible
 stars from the console's small named bright-star catalog.
 
@@ -288,13 +291,21 @@ same mapping, while strip readouts continue to show true nautical-mile range.
 
 ## Space Traffic
 
-The `SPACE TRAFFIC` page combines CelesTrak's `VISUAL` and `STATIONS` orbital
-groups. `satellite_telemetry.py` uses Skyfield to calculate current azimuth,
+The `SPACE TRAFFIC` page combines CelesTrak's `VISUAL`, `STATIONS`, and
+`STARLINK` orbital groups. `satellite_telemetry.py` uses Skyfield to calculate current azimuth,
 elevation, slant range, and upcoming passes from the console's local position.
 It also plots visible planets using the cached JPL DE421 ephemeris and up to
 three currently visible stars from a small named bright-star catalog. A single
 slow, smoothly moving blue acquisition line gives the all-sky display useful
 motion without representing the calculated orbital positions as radar returns.
+
+Starlink processing is deliberately load-bounded for the Raspberry Pi. The
+service advances through 300 spacecraft every five seconds, never performs
+12-hour pass prediction on the Starlink catalog, and publishes a fresh result
+after completing the staggered sweep. The radar renders only the 20 highest
+Starlinks as small phosphor points and labels the highest three; the footer
+reports the complete above-horizon count. The original visual/station objects
+and their touchable flight strips remain unchanged.
 
 Every satellite symbol has a 48×48 touchscreen target. Touching a satellite:
 
