@@ -26,7 +26,10 @@ except ImportError:
     mqtt = None
 
 
-MQTT_HOST = "snoop433.local"
+MQTT_HOSTS = tuple(dict.fromkeys(
+    host.strip() for host in os.environ.get(
+        "STARTREK_MQTT_HOSTS", "192.168.4.135,snoop433.local").split(",")
+    if host.strip()))
 MQTT_PORT = 1883
 SMARTTHINGS_CONFIG = os.path.expanduser("~/.config/startrek-smartthings.json")
 SMARTTHINGS_API = "https://api.smartthings.com/v1"
@@ -756,21 +759,31 @@ class TelemetryService:
                 self._data["mqtt"].update(error="PAHO MQTT NOT INSTALLED", connected=False)
             return
         while not self._stop.is_set():
-            try:
+            errors = []
+            for host in MQTT_HOSTS:
+                if self._stop.is_set():
+                    return
                 try:
-                    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
-                                         client_id="startrek-ship-status")
-                except AttributeError:
-                    client = mqtt.Client(client_id="startrek-ship-status")
-                client.on_connect = self._mqtt_connect
-                client.on_disconnect = self._mqtt_disconnect
-                client.on_message = self._mqtt_message
-                client.connect(MQTT_HOST, MQTT_PORT, 20)
-                client.loop_forever(retry_first_connection=True)
-            except Exception as exc:
+                    try:
+                        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
+                                             client_id="startrek-ship-status")
+                    except AttributeError:
+                        client = mqtt.Client(client_id="startrek-ship-status")
+                    client.on_connect = self._mqtt_connect
+                    client.on_disconnect = self._mqtt_disconnect
+                    client.on_message = self._mqtt_message
+                    with self._lock:
+                        self._data["mqtt"]["host"] = host
+                    client.connect(host, MQTT_PORT, 20)
+                    client.loop_forever(retry_first_connection=True)
+                    break
+                except Exception as exc:
+                    errors.append(f"{host}: {exc}")
+            else:
                 with self._lock:
-                    self._data["mqtt"].update(error=str(exc), connected=False)
-                self._stop.wait(5)
+                    self._data["mqtt"].update(error="; ".join(errors)[-240:],
+                                               connected=False)
+            self._stop.wait(5)
 
     def _mqtt_connect(self, client, _userdata, _flags, reason_code, _properties=None):
         connected = (not reason_code.is_failure) if hasattr(reason_code, "is_failure") else reason_code == 0

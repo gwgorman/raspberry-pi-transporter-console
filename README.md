@@ -186,6 +186,11 @@ beside `startrek.py`. Ship Status reads Pi health,
 topics from `snoop433.local:1883`, and the configured Tempest cloud observation.
 It does not publish MQTT messages or control any device.
 
+Local feeds try their configured last-known LAN addresses first and retain
+their `.local` names as fallbacks when mDNS is working across the wired/Wi-Fi
+boundary. Override the comma-separated candidates with
+`STARTREK_MQTT_HOSTS` and `STARTREK_PIAWARE_BASES` rather than editing source.
+
 The five-position display selector provides `TRANSPORTER`, `SHIP STATUS`,
 `AIR TRAFFIC`, `SPACE TRAFFIC`, and `AUTO` as top-level modes. Ship Status is
 subdivided into `CORE & WEATHER`, `ROOM SENSORS`, `HOUSE SYSTEMS`, and

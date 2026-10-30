@@ -5,17 +5,18 @@ import collections
 import copy
 import json
 import math
+import os
 import threading
 import time
 import urllib.error
 import urllib.request
 
 
-PIAWARE_BASE = "http://piawareoutside2.local"
-SKYAWARE_BASE = PIAWARE_BASE + "/skyaware"
-AIRCRAFT_URL = SKYAWARE_BASE + "/data/aircraft.json"
-RECEIVER_URL = SKYAWARE_BASE + "/data/receiver.json"
-STATUS_URL = PIAWARE_BASE + "/status.json"
+PIAWARE_BASES = tuple(dict.fromkeys(
+    base.strip().rstrip("/") for base in os.environ.get(
+        "STARTREK_PIAWARE_BASES",
+        "http://192.168.4.46,http://piawareoutside2.local").split(",")
+    if base.strip()))
 NEXRAD_TEMPLATE = ("http://mesonet1.agron.iastate.edu/cache/tile.py/1.0.0/"
                    "nexrad-n0q-900913/{z}/{x}/{y}.png")
 
@@ -58,6 +59,7 @@ class FlightTelemetryService:
         self._weather_thread = None
         self._weather_enabled = False
         self._type_cache = {}
+        self._base_index = 0
         self._tracks = collections.defaultdict(lambda: collections.deque(maxlen=90))
         self._data = {
             "updated": 0.0,
@@ -93,6 +95,23 @@ class FlightTelemetryService:
         with self._lock:
             return copy.deepcopy(self._data)
 
+    def _fetch(self, path, timeout=3, optional=False):
+        """Prefer mDNS, but rotate through configured last-known-good bases."""
+        errors = []
+        count = len(PIAWARE_BASES)
+        for offset in range(count):
+            index = (self._base_index + offset) % count
+            base = PIAWARE_BASES[index]
+            try:
+                payload = _json(base + path, timeout=timeout)
+                self._base_index = index
+                return payload
+            except (OSError, ValueError, urllib.error.URLError) as exc:
+                errors.append(f"{base}: {exc}")
+        if optional:
+            return {}
+        raise OSError("; ".join(errors)[-240:] or "NO PIAWARE BASE CONFIGURED")
+
     def _lookup_aircraft(self, icao):
         icao = str(icao or "").upper()
         if not icao:
@@ -102,7 +121,7 @@ class FlightTelemetryService:
         try:
             for level in range(1, len(icao)):
                 key, remainder = icao[:level], icao[level:]
-                payload = _json(f"{SKYAWARE_BASE}/db/{key}.json", timeout=2)
+                payload = self._fetch(f"/skyaware/db/{key}.json", timeout=2)
                 if remainder in payload:
                     result = payload[remainder]
                     self._type_cache[icao] = result
@@ -155,12 +174,12 @@ class FlightTelemetryService:
             now = time.time()
             try:
                 if now - receiver_refresh > 60 or not receiver:
-                    receiver = _json(RECEIVER_URL)
+                    receiver = self._fetch("/skyaware/data/receiver.json")
                     receiver_refresh = now
                 if now - status_refresh > 10 or not status:
-                    status = _optional_json(STATUS_URL)
+                    status = self._fetch("/status.json", optional=True)
                     status_refresh = now
-                payload = _json(AIRCRAFT_URL)
+                payload = self._fetch("/skyaware/data/aircraft.json")
                 aircraft = []
                 new_lookups = 0
                 def lookup_priority(item):
