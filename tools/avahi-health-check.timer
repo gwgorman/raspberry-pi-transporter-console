@@ -1,0 +1,13 @@
+[Unit]
+Description=Check Avahi mDNS health every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=avahi-health-check.service
+
+[Install]
+WantedBy=timers.target
+

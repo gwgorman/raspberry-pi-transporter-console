@@ -1,0 +1,15 @@
+#!/bin/sh
+
+set -eu
+
+host_name="$(hostname).local"
+
+if result="$(timeout 5 getent ahostsv4 "$host_name" 2>/dev/null)" && \
+        [ -n "$result" ]; then
+    exit 0
+fi
+
+logger -t avahi-health-check \
+    "Self-resolution failed for $host_name; restarting avahi-daemon"
+systemctl restart avahi-daemon.service
+

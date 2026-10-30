@@ -1,0 +1,9 @@
+[Unit]
+Description=Recover an unresponsive Avahi mDNS daemon
+After=network-online.target avahi-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/avahi-health-check
+

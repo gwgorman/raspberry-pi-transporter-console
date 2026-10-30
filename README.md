@@ -632,6 +632,29 @@ sudo install -o root -g root -m 755 tools/90-startrek-avahi-recovery \
 sudo systemctl enable --now avahi-daemon.service
 ```
 
+For the rarer failure where Avahi remains running but stops draining its mDNS
+socket, install the repository's self-resolution watchdog. It checks the Pi's
+own `<hostname>.local` record every five minutes, restarts only a failed Avahi
+daemon, and limits a wedged daemon's shutdown wait to ten seconds:
+
+```bash
+sudo install -o root -g root -m 755 tools/avahi-health-check \
+  /usr/local/sbin/avahi-health-check
+sudo install -o root -g root -m 644 tools/avahi-health-check.service \
+  /etc/systemd/system/avahi-health-check.service
+sudo install -o root -g root -m 644 tools/avahi-health-check.timer \
+  /etc/systemd/system/avahi-health-check.timer
+sudo install -d -o root -g root -m 755 \
+  /etc/systemd/system/avahi-daemon.service.d
+sudo install -o root -g root -m 644 tools/avahi-recovery-timeout.conf \
+  /etc/systemd/system/avahi-daemon.service.d/recovery-timeout.conf
+sudo systemctl daemon-reload
+sudo systemctl enable --now avahi-health-check.timer
+```
+
+The health check is generic and may also be installed on the PiAware receiver
+or other Debian/Raspberry Pi OS hosts that use Avahi and `libnss-mdns`.
+
 Verify from another machine with `ping startrek.local` or
 `ssh ggorman@startrek.local`. This hardening deliberately leaves IP assignment
 under DHCP; it does not require a router-side reservation.
