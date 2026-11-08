@@ -145,6 +145,7 @@ satellite_telemetry = SatelliteTelemetryService() if SatelliteTelemetryService e
 environment_sensor_page = 0
 house_system_page = 0
 battery_status_page = 0
+ENVIRONMENT_PAGE_SIZE = 8
 radar_range_nm = 80
 radar_weather_enabled = False
 selected_aircraft = None
@@ -2161,12 +2162,12 @@ def draw_environment_status(surface, now, data):
         txt(surface, "CONFIGURE PRIVATELY ON THE RASPBERRY PI", h * .017, MUTED,
             (grid.centerx, grid.centery + 44), "center", True)
     else:
-        page_size = 6
+        page_size = ENVIRONMENT_PAGE_SIZE
         page_count = max(1, math.ceil(len(temps) / page_size))
         active_page = min(environment_sensor_page, page_count - 1)
         shown = temps[active_page * page_size:(active_page + 1) * page_size]
         card_gap = 12
-        columns, rows = 2, 3
+        columns, rows = 2, 4
         top = grid.y + 58
         card_w = (grid.w - 36 - card_gap) // columns
         card_h = (grid.bottom - top - 18 - card_gap * (rows - 1)) // rows
@@ -3181,7 +3182,7 @@ def handle_touch(pos, now):
     if ship_status_active(now) or special_display_active(now):
         if display_mode == "SHIP STATUS" and status_page == "ENVIRONMENT":
             sensor_count = len((yolink.snapshot() if yolink else {}).get("temperature_sensors", []))
-            page_count = max(1, math.ceil(sensor_count / 6))
+            page_count = max(1, math.ceil(sensor_count / ENVIRONMENT_PAGE_SIZE))
             pager = environment_pager_layout(screen.get_size())
             if pager["PREVIOUS"].collidepoint(pos):
                 environment_sensor_page = max(0, environment_sensor_page - 1)
