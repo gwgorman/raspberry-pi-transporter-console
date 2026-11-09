@@ -146,6 +146,8 @@ environment_sensor_page = 0
 house_system_page = 0
 battery_status_page = 0
 ENVIRONMENT_PAGE_SIZE = 8
+HOUSE_SYSTEM_PAGE_SIZE = 16
+POWER_CELL_PAGE_SIZE = 16
 radar_range_nm = 80
 radar_weather_enabled = False
 selected_aircraft = None
@@ -2373,11 +2375,12 @@ def draw_house_status(surface, now, data):
     txt(surface, "SELECTED HABITATION SYSTEMS", h * .024, CREAM,
         (grid.x + 18, grid.y + 14), bold=True)
     groups = grouped_house_systems(data)
-    page_size, page_count = 12, max(1, math.ceil(len(groups) / 12))
+    page_size = HOUSE_SYSTEM_PAGE_SIZE
+    page_count = max(1, math.ceil(len(groups) / page_size))
     active_page = min(house_system_page, page_count - 1)
     shown = groups[active_page * page_size:(active_page + 1) * page_size]
     card_gap, top = 12, grid.y + 58
-    columns, rows = 4, 3
+    columns, rows = 4, 4
     card_w = (grid.w - 36 - card_gap * (columns - 1)) // columns
     pager = house_pager_layout(surface.get_size())
     cards_bottom = pager["PREVIOUS"].y - 8 if page_count > 1 else grid.bottom - 18
@@ -2482,8 +2485,15 @@ def draw_battery_card(surface, rect, item):
     panel(surface, rect, (8, 16, 17), BEZEL, 5)
     pygame.draw.circle(surface, BEZEL, (rect.x + 18, rect.y + 20), 9)
     pygame.draw.circle(surface, color, (rect.x + 18, rect.y + 20), 5)
-    display_name = str(item.get("name", "UNNAMED"))[:36].upper()
-    name_size = rect.h * (.085 if len(display_name) > 27 else .105)
+    display_name = str(item.get("name", "UNNAMED")).upper()
+    compact_names = {
+        "WASHING MACHINE WATER LEAK SENSOR": "WASHING MACHINE LEAK",
+        "UPSTAIRS WATER HEATER LEAK": "UPSTAIRS WH LEAK",
+    }
+    display_name = compact_names.get(display_name, display_name)
+    if len(display_name) > 21:
+        display_name = display_name[:20] + "…"
+    name_size = rect.h * (.078 if len(display_name) > 17 else .095)
     txt(surface, display_name, name_size, CREAM,
         (rect.x + 34, rect.y + 10), bold=True)
     txt(surface, str(item.get("source", "UNKNOWN")), rect.h * .075, MUTED,
@@ -2528,13 +2538,13 @@ def draw_power_status(surface, now, telemetry_data, yolink_data):
     nav_y = status_nav_layout(surface.get_size())["NETWORK"].y
     content_x = r["mode_selector"].right + gap
     content_w = w - margin - content_x
-    page_size = 12
+    page_size = POWER_CELL_PAGE_SIZE
     page_count = max(1, math.ceil(len(items) / page_size))
     active_page = min(battery_status_page, page_count - 1)
     shown = items[active_page * page_size:(active_page + 1) * page_size]
     pager = battery_pager_layout(surface.get_size())
     grid_bottom = pager["PREVIOUS"].y - 8 if page_count > 1 else nav_y - gap
-    columns, rows, card_gap = 3, 4, 10
+    columns, rows, card_gap = 4, 4, 10
     card_w = (content_w - card_gap * (columns - 1)) // columns
     card_h = (grid_bottom - body_y - card_gap * (rows - 1)) // rows
     if not shown:
@@ -3194,7 +3204,7 @@ def handle_touch(pos, now):
                 return
         if display_mode == "SHIP STATUS" and status_page == "HOUSE SYSTEMS":
             page_count = max(1, math.ceil(len(grouped_house_systems(
-                telemetry.snapshot() if telemetry else {})) / 6))
+                telemetry.snapshot() if telemetry else {})) / HOUSE_SYSTEM_PAGE_SIZE))
             pager = house_pager_layout(screen.get_size())
             if pager["PREVIOUS"].collidepoint(pos):
                 house_system_page = max(0, house_system_page - 1)
@@ -3207,7 +3217,8 @@ def handle_touch(pos, now):
         if display_mode == "SHIP STATUS" and status_page == "POWER CELLS":
             telemetry_data = telemetry.snapshot() if telemetry else {}
             yolink_data = yolink.snapshot() if yolink else {}
-            page_count = max(1, math.ceil(len(battery_inventory(telemetry_data, yolink_data)) / 12))
+            page_count = max(1, math.ceil(
+                len(battery_inventory(telemetry_data, yolink_data)) / POWER_CELL_PAGE_SIZE))
             pager = battery_pager_layout(screen.get_size())
             if pager["PREVIOUS"].collidepoint(pos):
                 battery_status_page = max(0, battery_status_page - 1)
