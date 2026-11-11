@@ -2070,7 +2070,14 @@ def draw_ship_status(surface, now, data):
     house = data.get("house", {})
     mqtt_info = data.get("mqtt", {})
     small_h = int(h * .068)
-    wine = house.get("wine_cellar", {})
+    # The wine cellar, like the kegerator, now uses its YoLink replacement.
+    climate_sensors = (yolink.snapshot() if yolink else {}).get("temperature_sensors", [])
+    wine = next((sensor for sensor in climate_sensors
+                 if sensor.get("name", "").strip().casefold() in
+                 {"wine cellar", "wine cellar temperature"}), {})
+    wine_updated = wine.get("reported_at")
+    wine_fresh = bool(wine_updated and time.time() - wine_updated < 3600
+                      and wine.get("online") is not False)
     # The retired SmartThings keg must never supply this card.
     keg_sensors = (yolink.snapshot() if yolink else {}).get("temperature_sensors", [])
     keg = next((sensor for sensor in keg_sensors
@@ -2082,8 +2089,8 @@ def draw_ship_status(surface, now, data):
     keg_humidity = keg.get("humidity")
     telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
                    "WINE CELLAR CLIMATE", f"{wine.get('temperature_f', '—')} °F  {wine.get('humidity', '—')}%",
-                   data_age(wine.get("updated"))[0], CYAN, bool(wine.get("updated")),
-                   bool(wine.get("updated") and time.time() - wine["updated"] < 3600))
+                   "YOLINK • " + data_age(wine_updated)[0], CYAN, wine.get("temperature_f") is not None,
+                   wine_fresh)
     aux_y += small_h + 7
     telemetry_card(surface, pygame.Rect(right.x + 16, aux_y, right.w - 32, small_h),
                    "KEGERATOR", f"{keg_temp if keg_temp is not None else '—'} °F  {keg_humidity if keg_humidity is not None else '—'}%",
@@ -2432,7 +2439,7 @@ def draw_house_status(surface, now, data):
 def battery_inventory(telemetry_data, yolink_data):
     """Combine battery-capable sources without pretending old readings are live."""
     items = [dict(item) for item in telemetry_data.get("house", {}).get("batteries", {}).values()
-             if item.get("name", "").strip().casefold() not in {"keg", "old keg"}]
+             if item.get("name", "").strip().casefold() not in {"keg", "old keg", "wine cellar temp", "old wine cellar temp", "old wine cellar temperature"}]
     for sensor in yolink_data.get("temperature_sensors", []):
         level = sensor.get("battery")
         if level is not None:
