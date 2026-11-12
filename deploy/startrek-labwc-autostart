@@ -1,0 +1,8 @@
+#!/bin/sh
+# Launch from the actual Wayland session even when desktop targets stay inactive.
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE XDG_CURRENT_DESKTOP
+systemctl --user start app-startrek@autostart.service &
+# Preserve Raspberry Pi's normal desktop startup services.
+if [ -r /etc/xdg/labwc/autostart ]; then
+    . /etc/xdg/labwc/autostart
+fi

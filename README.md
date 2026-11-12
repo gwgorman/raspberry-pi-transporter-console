@@ -728,3 +728,9 @@ the transporter masthead while operational instruments retain DejaVu Sans for
 readability.
 
 This is an unofficial fan-made project inspired by classic science-fiction control panels. *Star Trek* and related names and marks belong to their respective owners. No affiliation or endorsement is claimed. Audio from the television programs or films is not distributed here.
+
+### Labwc kiosk startup recovery
+
+Some desktop sessions leave `graphical-session.target` and the XDG autostart target inactive, so the generated kiosk service may exist without starting. On a dedicated Pi with no existing user Labwc autostart file, install `deploy/startrek-labwc-autostart` as `~/.config/labwc/autostart` (executable). It imports the live display environment, starts the existing supervised kiosk service and retains the system desktop startup. If a user autostart file already exists, merge the kiosk commands into it instead of overwriting it.
+
+Install `deploy/startrek-recovery.conf` as `~/.config/systemd/user/app-startrek@autostart.service.d/recovery.conf`, then run `systemctl --user daemon-reload`. Crashes restart after five seconds; intentional clean exits remain stopped. The hook takes effect on the next desktop session. Verify the service and actual rendered screen; do not infer display recovery from a successful start request alone.
